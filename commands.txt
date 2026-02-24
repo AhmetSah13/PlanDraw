@@ -1,0 +1,15 @@
+# name: stress_test
+# units: WORLD
+# max_time: 2
+# max_path: 100
+# max_moves: 50
+# max_bounds: 200
+# max_abs_coord: 10000
+
+SPEED 120
+PEN DOWN
+REPEAT 10
+FORWARD 50
+TURN 90
+END
+PEN UP

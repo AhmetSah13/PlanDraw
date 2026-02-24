@@ -1,0 +1,4 @@
+# Python 3.14: güncel sürümler (3.14 wheel destekli). 3.11/3.12 için eski pin'ler kullanılabilir.
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.12.0
