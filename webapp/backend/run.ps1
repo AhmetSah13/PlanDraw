@@ -1,18 +1,18 @@
-# PowerShell'de ExecutionPolicy hatasi verirse venv aktif olmadan calistirmak icin:
+# Backend'i yeni modüler yapidan calistirir (backend/).
 # Proje kokunden: .\webapp\backend\run.ps1
-# veya webapp/backend icinden: .\run.ps1
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$backend = Split-Path -Parent $PSScriptRoot
-$venvPython = Join-Path $backend ".venv\Scripts\python.exe"
+$backendDir = Join-Path $root "backend"
 
-if (-not (Test-Path $venvPython)) {
-    Write-Host "Venv yok, olusturuluyor..."
-    Set-Location $backend
-    & python -m venv .venv
-    & $venvPython -m pip install -r requirements.txt
+if (-not (Test-Path $backendDir)) {
+    Write-Error "backend klasoru bulunamadi: $backendDir"
 }
 
-Set-Location $backend
-& $venvPython -m uvicorn app.main:app --reload --port 8000
+Set-Location $backendDir
+$venvPython = Join-Path $backendDir ".venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+    & $venvPython -m uvicorn app.api.main:app --reload --port 8000
+} else {
+    python -m uvicorn app.api.main:app --reload --port 8000
+}

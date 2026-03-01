@@ -203,3 +203,71 @@ export async function exportRobot(script, options = {}) {
   }
   return data;
 }
+
+/**
+ * JSON plan dosyasını içe aktarır (M4). POST /api/import_plan.
+ * Return: { ok, error?, normalized?, warnings?, plan_text?, commands_text?, walls?, raw_path_points? }
+ */
+export async function importPlanFromJson(payload) {
+  const res = await fetch(`${BASE}/api/import_plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text || "Import yanıtı parse edilemedi");
+  }
+  return data;
+}
+
+/**
+ * DXF dosyasını içe aktarır. POST /api/import_dxf (multipart).
+ * @param {File} file - .dxf dosyası
+ * @param {object} options - ImportDxfOptions alanları (normalize, return_* bayrakları, step_size, speed, preview_layers, selected_layers, auto_step_target_moves vb.)
+ * Return: { ok, error?, normalized?, warnings?, plan_text?, commands_text?, walls?, raw_path_points?, layers?, suggested_layers?, recommended_step_size? }
+ */
+export async function importDxf(file, options) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("options_json", JSON.stringify(options));
+  const res = await fetch(`${BASE}/api/import_dxf`, {
+    method: "POST",
+    body: form
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text || "DXF import yanıtı parse edilemedi");
+  }
+  return data;
+}
+
+/**
+ * DWG dosyasını içe aktarır. POST /api/import_dwg (multipart). Backend DWG→DXF dönüştürücü kullanır.
+ * @param {File} file - .dwg dosyası
+ * @param {object} options - ImportDxfOptions ile aynı (normalize, return_*, step_size, speed, preview_layers, selected_layers, auto_step_target_moves vb.)
+ * Return: { ok, error?, normalized?, warnings?, plan_text?, commands_text?, walls?, raw_path_points?, layers?, suggested_layers?, recommended_step_size? }
+ */
+export async function importDwg(file, options) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("options_json", JSON.stringify(options));
+  const res = await fetch(`${BASE}/api/import_dwg`, {
+    method: "POST",
+    body: form
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(text || "DWG import yanıtı parse edilemedi");
+  }
+  return data;
+}

@@ -8,8 +8,8 @@ import sys
 import uuid
 from pathlib import Path
 
-# Proje kökünü path'e ekle (commands, scenario_analysis orada)
-_root = Path(__file__).resolve().parents[3]
+# backend/ klasörünü path'e ekle (app paketi için)
+_root = Path(__file__).resolve().parents[2]
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
@@ -20,28 +20,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import ValidationError
 
-from commands import (
+from app.execution.commands import (
     CommandParseError,
     Diagnostic,
     MoveCommand,
     parse_commands,
     serialize_commands,
 )
-from scenario_analysis import analyze_commands, export_commands_to_string, ScenarioLimits
-from executor import CommandExecutor
-from plan_module import load_plan_from_string
-from path_generator import PathGenerator
-from compiler import compile_path_to_commands
-from path_optimizer import optimize_commands, OptimizeConfig
+from app.analysis.scenario_analysis import analyze_commands, export_commands_to_string, ScenarioLimits
+from app.execution.executor import CommandExecutor
+from app.core.plan_module import load_plan_from_string
+from app.pathing.path_generator import PathGenerator
+from app.execution.compiler import compile_path_to_commands
+from app.pathing.path_optimizer import optimize_commands, OptimizeConfig
 
-from normalized_plan import import_plan_from_json
-from plan_normalizer import NormalizeOptions, normalize_plan
-from plan_importer import normalized_to_plan, normalized_to_plan_text, normalized_to_walls_array
-from dxf_importer import dxf_to_normalized_plan, inspect_dxf_layers
-from dwg_converter import convert_dwg_bytes_to_dxf_text, DwgConversionError
+from app.normalization.normalized_plan import import_plan_from_json
+from app.normalization.plan_normalizer import NormalizeOptions, normalize_plan
+from app.importers.plan_importer import normalized_to_plan, normalized_to_plan_text, normalized_to_walls_array
+from app.importers.dxf_importer import dxf_to_normalized_plan, inspect_dxf_layers
+from app.importers.dwg_converter import convert_dwg_bytes_to_dxf_text, DwgConversionError
 
-from .motion_model import MotionConfig, MotionState, apply_motion
-from .schemas import (
+from app.utils.motion_model import MotionConfig, MotionState, apply_motion
+from app.api.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     DiagnosticOut,
@@ -61,7 +61,7 @@ from .schemas import (
 )
 
 
-from .step_size_utils import preview_recommended_step_size as _preview_recommended_step_size
+from app.utils.step_size_utils import preview_recommended_step_size as _preview_recommended_step_size
 
 app = FastAPI(title="PlanDraw Web Backend", version="0.1.0")
 
@@ -669,6 +669,9 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
                 )
                 for (x, y, k) in (stats.collisions_sample or [])
             ],
+            wall_overlap_count=getattr(stats, "wall_overlap_count", 0),
+            wall_touch_count=getattr(stats, "wall_touch_count", 0),
+            wall_proper_cross_count=getattr(stats, "wall_proper_cross_count", 0),
         )
 
     # 4) Blocked kararı
@@ -926,6 +929,9 @@ async def create_job(req: SimulateRequest):
                 )
                 for (x, y, k) in (st.collisions_sample or [])
             ],
+            wall_overlap_count=getattr(st, "wall_overlap_count", 0),
+            wall_touch_count=getattr(st, "wall_touch_count", 0),
+            wall_proper_cross_count=getattr(st, "wall_proper_cross_count", 0),
         )
     parser_errors = sum(1 for d in parser_diags if d.severity == "ERROR")
     analysis_errors = sum(1 for d in analysis_diags if d.severity == "ERROR")
@@ -1153,6 +1159,9 @@ def compile_plan(req: CompilePlanRequest):
                 )
                 for (x, y, k) in (st.collisions_sample or [])
             ],
+            wall_overlap_count=getattr(st, "wall_overlap_count", 0),
+            wall_touch_count=getattr(st, "wall_touch_count", 0),
+            wall_proper_cross_count=getattr(st, "wall_proper_cross_count", 0),
         )
 
     out = {
@@ -1223,6 +1232,9 @@ def export_robot(req: ExportRequest) -> ExportResponse:
             )
             for (x, y, k) in (stats.collisions_sample or [])
         ],
+        wall_overlap_count=getattr(stats, "wall_overlap_count", 0),
+        wall_touch_count=getattr(stats, "wall_touch_count", 0),
+        wall_proper_cross_count=getattr(stats, "wall_proper_cross_count", 0),
     )
     return ExportResponse(
         ok=not blocked,

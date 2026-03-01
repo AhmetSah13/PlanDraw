@@ -1,0 +1,15 @@
+# Pre-commit: lint ve format (ruff)
+# Kurulum: pre-commit install
+# Tüm dosyalar: pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        files: ^backend/
+        args: [--config, backend/pyproject.toml, --fix]
+      - id: ruff-format
+        name: ruff-format
+        files: ^backend/
+        args: [--config, backend/pyproject.toml]

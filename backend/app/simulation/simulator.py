@@ -7,12 +7,12 @@ from typing import Dict, List, Tuple, Optional
 
 import pygame
 
-from plan_module import Plan, load_plan_from_file
-from path_generator import PathGenerator
-from commands import Command, MoveCommand, Diagnostic, parse_commands, serialize_commands
-from compiler import compile_path_to_commands
-from executor import CommandExecutor
-from scenario_analysis import analyze_commands, export_commands, ScenarioLimits, ScenarioStats
+from app.core.plan_module import Plan, load_plan_from_file
+from app.pathing.path_generator import PathGenerator
+from app.execution.commands import Command, MoveCommand, Diagnostic, parse_commands, serialize_commands
+from app.execution.compiler import compile_path_to_commands
+from app.execution.executor import CommandExecutor
+from app.analysis.scenario_analysis import analyze_commands, export_commands, ScenarioLimits, ScenarioStats
 
 
 # --- Gürültü / drift parametreleri ---

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from commands import Command, MoveCommand, PenCommand, SpeedCommand
+from app.execution.commands import Command, MoveCommand, PenCommand, SpeedCommand
 
 
 def compile_path_to_commands(

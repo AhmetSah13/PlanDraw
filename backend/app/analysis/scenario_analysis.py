@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Tuple, Optional, TYPE_CHECKING, Literal
 
-from commands import (
+from app.execution.commands import (
     Command,
     Diagnostic,
     MoveCommand,
@@ -20,7 +20,7 @@ from commands import (
 )
 
 if TYPE_CHECKING:
-    from path_optimizer import OptimizeConfig
+    from app.pathing.path_optimizer import OptimizeConfig
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,12 @@ class ScenarioStats:
     original_move_count: Optional[int] = None  # optimize açıksa kullanılan
     optimized_move_count: Optional[int] = None
     reduction_ratio: Optional[float] = None  # yüzde (0–100)
-    collision_count: int = 0
+    collision_count: int = 0  # yalnızca beklenmeyen (proper) kesişim sayısı
     collisions_sample: Optional[List[Tuple[Optional[float], Optional[float], str]]] = None
+    # Debug: duvar–çizim temas/overlap (beklenen; collision_count'a dahil değil)
+    wall_overlap_count: int = 0
+    wall_touch_count: int = 0
+    wall_proper_cross_count: int = 0
 
 
 def _count_moves(commands: List[Command]) -> int:
@@ -231,7 +235,7 @@ def analyze_commands(
                 severity="ERROR",
                 line=0,
                 message=f"MAX_MOVES aşıldı: {stats.move_count} > {lim.max_moves}",
-                text="",
+                text="Öneri: step_size değerini artırın veya segment_budget kullanın.",
             )
         )
     sx_min, sy_min, sx_max, sy_max = stats.bounds
@@ -245,7 +249,7 @@ def analyze_commands(
                 message=(
                     f"MAX_BOUNDS_SIZE aşıldı: w={bw:.2f}, h={bh:.2f} > {lim.max_bounds_size:.2f}"
                 ),
-                text="",
+                text="Öneri: recenter veya scale_override kullanın; büyük koordinatlı planlarda önce merkezleme açın.",
             )
         )
     for v in (sx_min, sy_min, sx_max, sy_max, start[0], start[1]):
@@ -278,11 +282,11 @@ def analyze_commands(
         )
 
     # --- W7: Duvar – çizim çakışma analizi ---
+    # Sadece "proper" (gerçek kesişim) beklenmeyen sayılır; overlap/touch duvar üstü çizimde normal.
     collisions: List[Collision] = []
     if walls:
-        from webapp.backend.app.geometry_utils import segment_intersection, polyline_segments
+        from app.utils.geometry_utils import segment_intersection, polyline_segments
 
-        # Sadece PEN DOWN sırasında oluşan çizim polylinelerini çıkar
         draw_polylines = extract_draw_polylines(commands, start)
         wall_segments: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
         for w in walls:
@@ -290,41 +294,64 @@ def analyze_commands(
                 wall_segments.append(((float(w[0]), float(w[1])), (float(w[2]), float(w[3]))))
 
         seg_index = 0
-        total_collisions = 0
+        proper_count = 0
+        touch_count = 0
+        overlap_count = 0
         for wall_idx, (wa, wb) in enumerate(wall_segments):
-            # Her duvar ile tüm çizim segmentlerini test et
             for poly in draw_polylines:
                 for sa, sb in polyline_segments(poly):
                     ok, pt, kind = segment_intersection(sa, sb, wa, wb)
                     if not ok:
                         seg_index += 1
                         continue
-                    total_collisions += 1
-                    if len(collisions) < MAX_COLLISIONS:
-                        msg = f"Çizim yolu duvar ile kesişiyor (wall={wall_idx}, seg={seg_index}, kind={kind})"
-                        cx, cy = (pt if pt is not None else (None, None))
-                        collisions.append(
-                            Collision(
-                                kind=kind, x=cx, y=cy,
-                                wall_index=wall_idx,
-                                seg_index=seg_index,
-                                message=msg,
+                    if kind == "overlap":
+                        overlap_count += 1
+                        seg_index += 1
+                        continue
+                    if kind == "touch":
+                        touch_count += 1
+                        seg_index += 1
+                        continue
+                    if kind == "proper":
+                        proper_count += 1
+                        if len(collisions) < MAX_COLLISIONS:
+                            msg = (
+                                f"Çizim yolu duvar ile kesişiyor (wall={wall_idx}, seg={seg_index}, kind={kind})"
                             )
-                        )
+                            cx, cy = (pt if pt is not None else (None, None))
+                            collisions.append(
+                                Collision(
+                                    kind=kind,
+                                    x=cx,
+                                    y=cy,
+                                    wall_index=wall_idx,
+                                    seg_index=seg_index,
+                                    message=msg,
+                                )
+                            )
                     seg_index += 1
 
-        if total_collisions > 0:
+        stats.collision_count = proper_count
+        stats.wall_proper_cross_count = proper_count
+        stats.wall_touch_count = touch_count
+        stats.wall_overlap_count = overlap_count
+        stats.collisions_sample = [
+            (c.x, c.y, c.kind) for c in collisions[:20]
+        ]
+
+        if proper_count > 0:
             sev = "ERROR" if collision_mode == "error" else "WARN"
-            add(sev, f"Duvarlarla kesişim tespit edildi: {total_collisions}")
-            if total_collisions > MAX_COLLISIONS:
+            add(sev, f"Duvarlarla beklenmeyen kesişim: {proper_count}")
+            if proper_count > MAX_COLLISIONS:
                 add(
                     "WARN",
-                    f"Kesişim sayısı yüksek: {total_collisions} (ilk {MAX_COLLISIONS} örnek tutuldu)",
+                    f"Kesişim sayısı yüksek: {proper_count} (ilk {MAX_COLLISIONS} örnek tutuldu)",
                 )
-            stats.collision_count = total_collisions
-            stats.collisions_sample = [
-                (c.x, c.y, c.kind) for c in collisions[:20]
-            ]
+        if overlap_count > 500:
+            add(
+                "WARN",
+                f"Duvar üstü çizim overlap sayısı: {overlap_count} (beklenen)",
+            )
 
     return stats, diagnostics
 

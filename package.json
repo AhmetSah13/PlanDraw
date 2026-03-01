@@ -4,7 +4,7 @@
   "description": "PlanDraw — Backend + Frontend tek komutla dev",
   "scripts": {
     "dev": "concurrently -n BACKEND,FRONTEND -c green,blue \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "dev:backend": "cd webapp/backend && if exist .venv\\Scripts\\python.exe (.venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --port 8000) else (python -m uvicorn app.main:app --reload --port 8000)",
+    "dev:backend": "cd backend && python -m uvicorn app.api.main:app --reload --port 8000",
     "dev:frontend": "cd webapp/frontend && npm run dev -- --host 127.0.0.1 --port 5173"
   },
   "devDependencies": {

@@ -29,6 +29,10 @@ class StatsOut(BaseModel):
     # collisions_sample: ilk N örnek; W2 UI'da hızlı gösterim için.
     # kind: "touch" | "proper" | "overlap"
     collisions_sample: List["CollisionOut"] = []
+    # Debug: duvar–çizim overlap/touch (beklenen); collision_count yalnızca proper kesişim
+    wall_overlap_count: int = 0
+    wall_touch_count: int = 0
+    wall_proper_cross_count: int = 0
 
 
 class CollisionOut(BaseModel):

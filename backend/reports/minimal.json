@@ -1,0 +1,41 @@
+{
+  "file": "golden_dxfs\\minimal.dxf",
+  "result": "PASS",
+  "failure_reason": null,
+  "recommended_actions": [],
+  "dxf_units_detected": "mm",
+  "bbox": [
+    0.0,
+    0.0,
+    0.1,
+    0.05
+  ],
+  "bbox_size": [
+    0.1,
+    0.05
+  ],
+  "total_length_m": 0.1118033988749895,
+  "selected_layers": [
+    "0"
+  ],
+  "recommended_step_size_raw": 0.05,
+  "final_step_size_used": 0.05,
+  "move_count": 4,
+  "collision_count": 0,
+  "pen_up_travel_distance": 0.055902,
+  "analyze_result": "SAFE",
+  "retry_attempts": [],
+  "strategy_succeeded": null,
+  "runtime_ms": {
+    "preview": 0.08,
+    "import": 0.08,
+    "path": 0.02,
+    "analyze": 0.02,
+    "export": 0.04
+  },
+  "export_roundtrip_ok": true,
+  "error": null,
+  "warnings": [
+    "Recentering applied (mode=center, dx=-0.05, dy=-0.025)."
+  ]
+}

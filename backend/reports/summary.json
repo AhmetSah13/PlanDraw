@@ -1,0 +1,9 @@
+{
+  "total": 1,
+  "PASS": 1,
+  "WARN": 0,
+  "FAIL": 0,
+  "PASS_AFTER_RETRY": 0,
+  "FAIL_AFTER_RETRY": 0,
+  "failure_reasons": {}
+}

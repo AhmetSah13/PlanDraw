@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-from commands import (
+from app.execution.commands import (
     Command,
     MoveCommand,
     MoveRelCommand,
