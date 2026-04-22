@@ -1,4 +1,9 @@
-# PlanDraw Frontend
+# LEGACY FRONTEND (DONDURULDU)
+
+> UYARI: Bu klasör aktif frontend değildir. Yeni geliştirme için `webapp/operator-v2` kullanın.
+> Bu klasörde `npm install`, `dev`, `build`, `test`, `lint`, `e2e` komutları bilinçli olarak engellenmiştir.
+
+# PlanDraw Frontend (Legacy Arşiv)
 
 ## PowerShell'de "running scripts is disabled" hatası
 

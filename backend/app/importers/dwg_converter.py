@@ -15,9 +15,14 @@ def _get_converter_command(input_path: Path, output_path: Path) -> list[str]:
     """
     Ortam değişkenlerinden DWG dönüştürücü komutunu oluşturur.
 
-    DWG_CONVERTER_PATH: Çalıştırılabilir dosya yolu.
+    DWG_CONVERTER_PATH: Çalıştırılabilir dosya yolu (ör. ODA File Converter).
     DWG_CONVERTER_ARGS: Argüman şablonu, {input} ve {output} placeholder'larını içerebilir.
-        Örnek: "--in {input} --out {output}" veya "{input} {output}"
+        Örnek: "--in {input} --out {output}" veya "{input} {output}".
+
+    Örnek yapılandırma (Windows, PowerShell):
+
+        $env:DWG_CONVERTER_PATH = "C:\\Program Files\\ODA\\Odaconv.exe"
+        $env:DWG_CONVERTER_ARGS = "{input} {output}"
     """
     converter_path = os.getenv("DWG_CONVERTER_PATH")
     if not converter_path:
@@ -36,10 +41,14 @@ def _get_converter_command(input_path: Path, output_path: Path) -> list[str]:
     return argv
 
 
-def convert_dwg_bytes_to_dxf_text(dwg_bytes: bytes, timeout_seconds: float = 60.0) -> str:
+def convert_dwg_bytes_to_dxf_bytes(dwg_bytes: bytes, timeout_seconds: float = 60.0) -> bytes:
     """
     Verilen DWG baytlarını geçici dizine yazar, harici dönüştürücü ile DXF'e çevirir
-    ve UTF-8 olarak okunmuş DXF metnini döndürür.
+    ve ham DXF baytlarını döndürür.
+
+    Not: Bu fonksiyon DXF içeriğini yorumlamaz; yalnızca dönüştürme işini yapar.
+    DXF baytları daha sonra DXF pipeline'ında (inspect_dxf_layers_bytes / dxf_bytes_to_normalized_plan)
+    kullanılmalıdır.
     """
     if not isinstance(dwg_bytes, (bytes, bytearray)):
         raise DwgConversionError("DWG verisi bytes olmalıdır.")
@@ -74,15 +83,21 @@ def convert_dwg_bytes_to_dxf_text(dwg_bytes: bytes, timeout_seconds: float = 60.
         if not output_path.exists():
             raise DwgConversionError("DWG dönüştürme DXF çıktısı üretmedi.")
 
-        try:
-            dxf_text = output_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            # Şu an: metin değilse reddet. İleride istenirse utf-8 fail → latin-1 gibi
-            # "best effort" modu eklenebilir (bazı converter'lar ANSI/CP1254 verebilir).
-            raise DwgConversionError("DXF çıktısı geçerli UTF-8 metin değil.") from exc
-
-        if not dxf_text.strip():
+        dxf_bytes = output_path.read_bytes()
+        if not dxf_bytes.strip():
             raise DwgConversionError("DXF çıktısı boş.")
 
-        return dxf_text
+        return dxf_bytes
+
+
+def convert_dwg_bytes_to_dxf_text(dwg_bytes: bytes, timeout_seconds: float = 60.0) -> str:
+    """
+    Geriye dönük uyumluluk için: DXF baytlarını UTF-8 metne decode eden sarmalayıcı.
+    Yeni kodlar mümkünse convert_dwg_bytes_to_dxf_bytes kullanmalıdır.
+    """
+    dxf_bytes = convert_dwg_bytes_to_dxf_bytes(dwg_bytes, timeout_seconds=timeout_seconds)
+    try:
+        return dxf_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise DwgConversionError("DXF çıktısı geçerli UTF-8 metin değil.") from exc
 

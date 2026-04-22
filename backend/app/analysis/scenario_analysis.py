@@ -106,9 +106,9 @@ def analyze_commands(
     reduction_ratio: Optional[float] = None
 
     if optimize_cfg is not None and getattr(optimize_cfg, "enabled", False):
-        from path_optimizer import optimize_commands
+        from app.pathing.path_optimizer import optimize_commands as _optimize_commands
         original_move_count = _count_moves(commands)
-        commands = optimize_commands(commands, start, optimize_cfg)
+        commands = _optimize_commands(commands, start, optimize_cfg)
         optimized_move_count = _count_moves(commands)
         if original_move_count and optimized_move_count is not None:
             reduction_ratio = (1.0 - optimized_move_count / original_move_count) * 100.0
@@ -529,13 +529,18 @@ def export_commands_to_string(
     Export içeriğini string olarak döndürür.
     format: "flat" | "absolute_only" | "robot_v1" | "gcode_lite"
     Döner: (content, blocked, stats, analysis_diagnostics).
+
+    HTTP ``/api/export`` ve job hattı için: komutlar zaten
+    ``prepare_job_commands`` ile optimize edildiyse ``optimize_cfg=None``
+    verin; aksi halde burada ve ``analyze_commands`` içinde ikinci kez
+    optimize uygulanır.
     """
     to_serialize = commands
     if format in ("absolute_only", "robot_v1", "gcode_lite"):
         to_serialize = _commands_to_absolute_only(commands, start)
     if optimize_cfg is not None and getattr(optimize_cfg, "enabled", False):
-        from path_optimizer import optimize_commands
-        to_serialize = optimize_commands(commands, start, optimize_cfg)
+        from app.pathing.path_optimizer import optimize_commands as _opt_cmds
+        to_serialize = _opt_cmds(commands, start, optimize_cfg)
         to_serialize = _commands_to_absolute_only(to_serialize, start)
 
     stats, diags = analyze_commands(commands, start, limits=limits, optimize_cfg=optimize_cfg)

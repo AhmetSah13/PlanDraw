@@ -1,0 +1,280 @@
+{
+  "file": "benchmarks\\A_expected_pass\\double_wall_T_junction.dxf",
+  "result": "PASS",
+  "failure_reason": null,
+  "recommended_actions": [
+    "Bu plan şimdilik MVP kapsamı dışında; duvar-only sadeleştirilmiş bir DXF üretip tekrar deneyin.",
+    "Duvar layer'larını netleştirip (örneğin WALL/A-WALL) diğer layer'ları export sırasında kapatmayı deneyin."
+  ],
+  "dxf_units_detected": "mm",
+  "bbox": [
+    2.0,
+    0.0,
+    8.0,
+    8.0
+  ],
+  "bbox_size": [
+    6.0,
+    8.0
+  ],
+  "total_length_m": 28.0,
+  "selected_layers": [
+    "WALLS"
+  ],
+  "recommended_step_size_raw": 0.05,
+  "final_step_size_used": 0.05,
+  "move_count": 567,
+  "collision_count": 0,
+  "pen_up_travel_distance": 3.898571,
+  "analyze_result": "SAFE",
+  "retry_attempts": [],
+  "strategy_succeeded": null,
+  "runtime_ms": {
+    "preview": 0.23,
+    "import": 0.26,
+    "path": 0.18,
+    "analyze": 3.11,
+    "export": 2.45
+  },
+  "export_roundtrip_ok": true,
+  "dwg_convert_runtime_ms": null,
+  "dxf_size_bytes": null,
+  "error": null,
+  "fail_reason_code": null,
+  "suite": "A",
+  "original_total_segments": 4,
+  "original_total_length_m": 28.0,
+  "post_budget_total_segments": 4,
+  "post_budget_total_length_m": 28.0,
+  "plan_length_m": 28.0,
+  "drawn_length_m": 28.0,
+  "travel_length_m": 3.898571136907,
+  "path_length_m": 31.898571136907,
+  "path_overhead": 1.139235,
+  "shape_retention_plan": 1.0,
+  "shape_retention_drawn": 1.0,
+  "original_walls_candidate_length_m": 28.0,
+  "original_drawable_length_m": 28.0,
+  "retention_vs_all": 1.0,
+  "retention_vs_walls_candidate": 1.0,
+  "retention_vs_drawable": 1.0,
+  "segment_budget_applied": false,
+  "units_retry_used": false,
+  "units_retry_reason": null,
+  "units_candidates": null,
+  "units_chosen": null,
+  "units_retry_metrics": null,
+  "dxf_diagnostics": {
+    "entity_counts": {
+      "LINE": 4,
+      "LWPOLYLINE": 0,
+      "POLYLINE": 0,
+      "ARC": 0,
+      "CIRCLE": 0,
+      "SPLINE": 0,
+      "INSERT": 0,
+      "HATCH": 0,
+      "TEXT": 0,
+      "DIMENSION": 0
+    },
+    "layers": [
+      {
+        "name": "WALLS",
+        "entity_count": 4,
+        "total_length": 28.0,
+        "entity_types": []
+      }
+    ],
+    "complexity": {
+      "total_entities": 4,
+      "total_layers": 1,
+      "total_segments_after_flatten": 0,
+      "spline_count": 0,
+      "hatch_count": 0,
+      "insert_count": 0,
+      "exploded_insert_entities": 0,
+      "hatch_boundaries_extracted": 0
+    },
+    "bbox": {
+      "bbox_size_world": [
+        6.0,
+        8.0
+      ],
+      "bbox_size_raw": null
+    },
+    "units": {
+      "units_detected": "mm"
+    },
+    "diagnostics_flags": [],
+    "insert_count": 0,
+    "exploded_insert_entities": 0,
+    "hatch_count": 0,
+    "hatch_boundaries_extracted": 0
+  },
+  "layer_intelligence": {
+    "candidate_layers": [
+      "WALLS"
+    ],
+    "selected_layers": [
+      "WALLS"
+    ],
+    "scores": {
+      "WALLS": 8.3673
+    }
+  },
+  "graph_metrics": {
+    "node_count": 8,
+    "edge_count": 4,
+    "connected_components_count": 4,
+    "connected_component_sizes": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "degree_histogram": {
+      "0": 0,
+      "1": 8,
+      "2": 0,
+      "3+": 0
+    },
+    "intersection_count": 0,
+    "dangling_edges_count": 4,
+    "closed_cycles_count": 0,
+    "cycle_perimeters": [],
+    "dominant_angles": {
+      "0": 2,
+      "90": 2,
+      "45": 0,
+      "135": 0,
+      "other": 0
+    },
+    "edge_length_stats": {
+      "min": 6.0,
+      "median": 8.0,
+      "p95": 8.0
+    },
+    "wall_likeliness_score": 0.37
+  },
+  "room_candidates_count": 0,
+  "wall_candidates_count": 4,
+  "move_count_before_optimize": null,
+  "move_count_after_optimize": null,
+  "travel_length_before_optimize": null,
+  "travel_length_after_optimize": null,
+  "path_overhead_before_optimize": null,
+  "path_overhead_after_optimize": null,
+  "travel_reduction_pct": null,
+  "commands_baseline_metrics": null,
+  "commands_optimized_metrics": null,
+  "optimizer_decision": null,
+  "layer_graph_scores": [
+    {
+      "layer": "WALLS",
+      "score": 7.0509,
+      "metrics": {
+        "total_length_m": 28.0,
+        "edge_count": 4,
+        "dangling_edges_count": 4,
+        "closed_cycles_count": 0,
+        "degree_histogram": {
+          "0": 0,
+          "1": 8,
+          "2": 0,
+          "3+": 0
+        },
+        "dominant_angles": {
+          "0": 2,
+          "90": 2,
+          "45": 0,
+          "135": 0,
+          "other": 0
+        },
+        "short_segment_ratio": 0.0
+      }
+    }
+  ],
+  "warnings": [
+    "Recentering applied (mode=center, dx=-5.0, dy=-4.0)."
+  ],
+  "room_candidates": [],
+  "wall_candidates": [
+    {
+      "length_sum": 8.0,
+      "bbox": [
+        0.0,
+        -4.0,
+        0.0,
+        4.0
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    },
+    {
+      "length_sum": 8.0,
+      "bbox": [
+        0.19999999999999998,
+        -4.0,
+        0.19999999999999998,
+        4.0
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    },
+    {
+      "length_sum": 6.0,
+      "bbox": [
+        -3.0,
+        2.0,
+        3.0,
+        2.0
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    },
+    {
+      "length_sum": 6.0,
+      "bbox": [
+        -3.0,
+        2.1999999999999997,
+        3.0,
+        2.1999999999999997
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    }
+  ],
+  "wall_candidate_length_m": 28.0,
+  "wall_filter_drops": {
+    "short_segment": 0,
+    "small_component": 0,
+    "angle_noise": 0
+  },
+  "wall_filter_snap_tol_m": 0.0001,
+  "wall_filter_metrics_before": {
+    "drawn_length_m": 28.0,
+    "travel_length_m": 3.898571136907,
+    "path_overhead": 1.139235,
+    "move_count": 567
+  },
+  "wall_filter_metrics_after": {
+    "drawn_length_m": 28.0,
+    "travel_length_m": 3.898571136907,
+    "path_overhead": 1.139235,
+    "move_count": 567
+  },
+  "wall_filter_decision": {
+    "used": true,
+    "reason": "FILTER_OK",
+    "thresholds": {
+      "drawn_min_ratio": 0.98,
+      "travel_max_ratio": 1.05
+    }
+  },
+  "wall_final_length_m": 28.0,
+  "scope_class": "OUT_OF_SCOPE_OTHER"
+}

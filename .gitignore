@@ -24,3 +24,9 @@ venv/
 *.tmp
 *.bak
 
+# Proje çalışma çıktıları
+out/
+
+# Ortam değişkenleri (commit etmeyin)
+backend/.env
+

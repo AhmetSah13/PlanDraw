@@ -55,6 +55,67 @@ class TestImportDwgAPI(unittest.TestCase):
             response.error,
         )
 
+    def test_import_dwg_uses_converter_and_reuses_dxf_pipeline(self):
+        """DWG adapter, converter çıktısını DXF bytes olarak DXF pipeline'a verir."""
+        import json
+        import app.api.main as api_main
+
+        # Minimal tek LINE içeren ASCII DXF (test_import_dxf_api ile uyumlu).
+        dxf_text = """
+  0
+SECTION
+  2
+HEADER
+  9
+$INSUNITS
+ 70
+4
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 11
+100.0
+ 21
+50.0
+  0
+ENDSEC
+  0
+EOF
+"""
+
+        def fake_convert(dwg_bytes: bytes, timeout_seconds: float = 60.0) -> bytes:  # type: ignore[override]
+            # Gerçek dönüştürüyü çağırmak yerine sabit DXF döndür.
+            return dxf_text.encode("utf-8")
+
+        orig = api_main.convert_dwg_bytes_to_dxf_bytes
+        api_main.convert_dwg_bytes_to_dxf_bytes = fake_convert  # type: ignore[assignment]
+        try:
+            options = {
+                "return_plan_text": True,
+                "return_commands_text": True,
+                "normalize": True,
+            }
+            response = _call_import_dwg(
+                b"dummy dwg",
+                options_json=json.dumps(options),
+            )
+            self.assertTrue(response.ok, msg=getattr(response, "error", None))
+            self.assertIsNotNone(response.plan_text)
+            self.assertIn("LINE", response.plan_text or "")
+        finally:
+            api_main.convert_dwg_bytes_to_dxf_bytes = orig  # type: ignore[assignment]
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,5 @@
-# Backend'i yeni modüler yapidan calistirir (backend/).
+# UYARI: webapp/backend LEGACY/DEPRECATED.
+# Source of truth backend/: app.api.main:app
 # Proje kokunden: .\webapp\backend\run.ps1
 
 $ErrorActionPreference = "Stop"

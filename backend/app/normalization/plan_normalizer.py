@@ -73,6 +73,9 @@ def normalize_plan(
     opts = options or NormalizeOptions()
     warnings: List[str] = []
     segments: List[SegmentIn] = []
+    segment_budget_applied = False
+    budget_kept_count: int | None = None
+    budget_dropped_count: int | None = None
 
     # A) Zero-length drop
     for i, seg in enumerate(plan.segments):
@@ -196,9 +199,13 @@ def normalize_plan(
                 lengths, key=lambda item: (-item[0], item[1])
             )
             keep_indices = {idx for _, idx in lengths_sorted[:budget]}
+            before_count = len(segments)
             segments = [seg for idx, seg in enumerate(segments) if idx in keep_indices]
+            segment_budget_applied = True
+            budget_kept_count = len(segments)
+            budget_dropped_count = before_count - len(segments)
             warnings.append(
-                f"Segment budget applied: kept {len(segments)} longest of {len(lengths)}."
+                f"Segment budget applied: kept {len(segments)} longest of {before_count}."
             )
 
     # E) recenter: bbox merkezini veya min köşesini (0,0)'a taşı
@@ -235,12 +242,22 @@ def normalize_plan(
                     f"Recentering applied (mode={opts.recenter_mode}, dx={dx_r}, dy={dy_r})."
                 )
 
+    # extraction_summary güncelle (segment_budget uygulandıysa)
+    out_metadata = dict(plan.metadata) if plan.metadata else {}
+    if segment_budget_applied and budget_kept_count is not None and budget_dropped_count is not None:
+        es = out_metadata.get("extraction_summary") or {}
+        es = dict(es)
+        es["segment_budget_applied"] = True
+        es["kept_count"] = budget_kept_count
+        es["dropped_count"] = budget_dropped_count
+        out_metadata["extraction_summary"] = es
+
     out_plan = NormalizedPlan(
         version=plan.version,
         units=plan.units,
         scale=plan.scale,
         origin=plan.origin,
         segments=segments,
-        metadata=plan.metadata,
+        metadata=out_metadata,
     )
     return out_plan, warnings

@@ -49,6 +49,11 @@ class OptimizeConfigOut(BaseModel):
     min_segment_length: float = 0.5
     collinear_angle_eps_deg: float = 1.0
     rdp_epsilon: float = 0.0
+    join_epsilon_m: float = 0.001
+    max_2opt_iterations: int = 50
+    time_budget_ms: float = 5000.0
+    preserve_order_for_layers: bool = False
+    deterministic_seed: Optional[int] = None
 
 
 class MotionConfigOut(BaseModel):
@@ -74,6 +79,16 @@ class AnalyzeResponse(BaseModel):
     stats: StatsOut
 
 
+class JobFileArtifactRequest(BaseModel):
+    """Job bittiğinde, simülasyonda kullanılan komut listesi FileDriver ile diske yazılsın."""
+
+    enabled: bool = Field(default=False, description="True ise done öncesi artifact üretilir")
+    mode: Literal["dsl", "robot_v1"] = Field(
+        default="dsl",
+        description="FileDriver modu: dsl (serialize_commands) veya robot_v1 (export_commands_to_string)",
+    )
+
+
 class SimulateRequest(BaseModel):
     text: str = Field(default="", description="Scenario script (commands.txt content)")
     dt: float = Field(default=0.016, description="Simulation time step (s)")
@@ -83,6 +98,10 @@ class SimulateRequest(BaseModel):
     motion: Optional[MotionConfigOut] = None
     walls: Optional[List[List[float]]] = None
     collision_mode: Literal["warn", "error"] = "warn"
+    file_artifact: Optional[JobFileArtifactRequest] = Field(
+        default=None,
+        description="İsteğe bağlı: job tamamlanınca aynı List[Command] FileDriver çıktısı",
+    )
 
 
 class CompilePlanRequest(BaseModel):
@@ -92,6 +111,28 @@ class CompilePlanRequest(BaseModel):
     world_scale: float = Field(default=1.0, gt=0, description="Dünya ölçeği")
     world_offset: Optional[Tuple[float, float]] = None
     optimize: Optional[OptimizeConfigOut] = None
+
+
+class ExecuteSerialRequest(BaseModel):
+    """Seri porta gönderim: port/baudrate istemciden gelmez (yalnızca env)."""
+
+    text: str = Field(default="", description="DSL senaryo metni")
+    start: Optional[Tuple[float, float]] = None
+    optimize: Optional[OptimizeConfigOut] = None
+    dry_run: bool = Field(
+        default=True,
+        description="True: UART açılmaz; yalnızca artifact + özet. False: SERIAL_PORT gerekir.",
+    )
+
+
+class ExecuteSerialResponse(BaseModel):
+    status: str
+    message: str
+    command_count: int = 0
+    driver_status: Optional[Dict[str, Any]] = None
+    error_detail: Optional[str] = None
+    artifact_paths: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
 
 
 class ExportRequest(BaseModel):
@@ -198,6 +239,19 @@ class ImportDxfOptions(BaseModel):
     segment_budget: Optional[int] = None
     budget_strategy: Literal["keep_longest", "error"] = "keep_longest"
     auto_step_target_moves: Optional[int] = 800
+    # Gerçek DXF desteği: preprocess/discretize ayarları (opsiyonel, geriye uyumlu)
+    chord_tolerance_m: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Eğri discretization toleransı (metre). None ise adaptif.",
+    )
+    preprocess_target_max_segments: int = Field(
+        default=15000,
+        gt=100,
+        description="Preprocess hedef maksimum segment sayısı (discretize guard).",
+    )
+    explode_blocks: bool = Field(default=True, description="INSERT blok patlatma (virtual_entities)")
+    max_insert_depth: int = Field(default=8, ge=0, le=20, description="INSERT recursion depth limiti")
 
 
 class LayerStats(BaseModel):
@@ -206,6 +260,21 @@ class LayerStats(BaseModel):
     segments: int
     total_length: float
     bbox: Optional[List[float]] = None  # [minx,miny,maxx,maxy]
+
+
+class DxfInsightReport(BaseModel):
+    """DXF Insight Report — preview yanıtında opsiyonel."""
+
+    entity_counts_total: Optional[Dict[str, int]] = None
+    entity_counts_supported: Optional[Dict[str, int]] = None
+    entity_counts_unsupported: Optional[Dict[str, int]] = None
+    unsupported_samples: Optional[List[Dict[str, Any]]] = None
+    layer_entity_counts: Optional[Dict[str, Dict[str, int]]] = None
+    layer_scores: Optional[List[Dict[str, Any]]] = None
+    suggested_layers_reasons: Optional[List[Dict[str, Any]]] = None
+    parse_warnings: Optional[List[Any]] = None  # string veya {code, message, user_action}
+    warning_codes: Optional[List[str]] = None
+    recommended_action: Optional[str] = None  # Kısa öneri cümlesi
 
 
 class ImportDxfResponse(ImportPlanResponse):
@@ -219,3 +288,25 @@ class ImportDxfResponse(ImportPlanResponse):
     world_scale: Optional[float] = None
     world_bbox_m: Optional[List[float]] = None  # [minx,miny,maxx,maxy] metre cinsinden
     world_total_length_m: Optional[float] = None  # metre cinsinden toplam yol uzunluğu
+    # DXF Insight Report (preview_layers=true ise)
+    dxf_insight: Optional[DxfInsightReport] = None
+    # DWG -> DXF adapter debug alanları (sadece /api/import_dwg kullanabilir)
+    dwg_convert_runtime_ms: Optional[float] = None
+    dxf_size_bytes: Optional[int] = None
+
+
+class ControlPointIn(BaseModel):
+    cad_x: float
+    cad_y: float
+    site_x: float
+    site_y: float
+    label: Optional[str] = None
+    weight: Optional[float] = None
+
+
+class AlignRigid2dRequest(BaseModel):
+    """Duvar segmentleri (dünya m) + kontrol noktaları → rijit 2D hizalama."""
+
+    walls: List[List[float]] = Field(default_factory=list, description="Her satır [x1,y1,x2,y2]")
+    control_points: List[ControlPointIn] = Field(default_factory=list)
+    tolerance_m: float = Field(default=0.05, gt=0, description="İzin verilen max residual (m)")

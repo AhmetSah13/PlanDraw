@@ -1,0 +1,62 @@
+{
+  "file": "benchmarks\\B_realistic\\sample.dxf",
+  "result": "PASS",
+  "failure_reason": null,
+  "recommended_actions": [],
+  "dxf_units_detected": "m",
+  "bbox": [
+    0.0,
+    0.0,
+    20.0,
+    12.0
+  ],
+  "bbox_size": [
+    20.0,
+    12.0
+  ],
+  "total_length_m": 270.75718890641986,
+  "selected_layers": [
+    "WALLS"
+  ],
+  "recommended_step_size_raw": 0.3384464861330248,
+  "final_step_size_used": 0.3384464861330248,
+  "move_count": 559,
+  "collision_count": 0,
+  "pen_up_travel_distance": 41.390635,
+  "analyze_result": "SAFE",
+  "retry_attempts": [],
+  "strategy_succeeded": null,
+  "runtime_ms": {
+    "preview": 0.76,
+    "import": 0.53,
+    "path": 0.2,
+    "analyze": 0.35,
+    "export": 0.74
+  },
+  "export_roundtrip_ok": true,
+  "dwg_convert_runtime_ms": null,
+  "dxf_size_bytes": null,
+  "error": null,
+  "fail_reason_code": null,
+  "suite": "B",
+  "original_total_segments": 37,
+  "original_total_length_m": 270.75718890642,
+  "post_budget_total_segments": 25,
+  "post_budget_total_length_m": 180.109573747657,
+  "plan_length_m": 180.109573747657,
+  "drawn_length_m": 221.000209003445,
+  "travel_length_m": 0.0,
+  "path_length_m": 221.000209003445,
+  "path_overhead": 1.0,
+  "shape_retention_plan": 0.665207,
+  "shape_retention_drawn": 0.81623,
+  "segment_budget_applied": false,
+  "units_retry_used": false,
+  "units_retry_reason": null,
+  "units_candidates": null,
+  "units_chosen": null,
+  "units_retry_metrics": null,
+  "warnings": [
+    "Recentering applied (mode=center, dx=-10.0, dy=-6.0)."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "total": 3,
+  "PASS": 3,
+  "WARN": 0,
+  "FAIL": 0,
+  "PASS_AFTER_RETRY": 0,
+  "FAIL_AFTER_RETRY": 0,
+  "failure_reasons": {},
+  "by_suite": {
+    "A": {
+      "PASS": 1,
+      "WARN": 0,
+      "FAIL": 0,
+      "median_shape_retention_plan": 0.684783,
+      "median_shape_retention_drawn": 0.930438
+    },
+    "B": {
+      "PASS": 2,
+      "WARN": 0,
+      "FAIL": 0,
+      "median_shape_retention_plan": 0.649976,
+      "median_shape_retention_drawn": 0.800455
+    }
+  },
+  "budget_too_much_loss_count_C": 0,
+  "fail_reason_codes_top": []
+}

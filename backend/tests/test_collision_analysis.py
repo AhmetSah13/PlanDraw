@@ -109,6 +109,19 @@ PEN UP
         self.assertEqual(stats.wall_proper_cross_count, stats.collision_count)
         self.assertTrue(any("beklenmeyen kesişim" in d.message for d in diags))
 
+    def test_speed_zero_with_move_warns_and_no_estimated_time(self):
+        """SPEED=0 iken anlamlı hareket: süre tahmini yok, WARN üretilir."""
+        text = """SPEED 0
+PEN DOWN
+MOVE 10 0
+PEN UP
+"""
+        commands, _ = parse_commands(text, strict=True)
+        stats, diags = analyze_commands(commands, start=(0.0, 0.0), walls=None)
+        self.assertIsNone(stats.estimated_time)
+        self.assertTrue(any("SPEED=0" in d.message for d in diags))
+        self.assertTrue(any(d.severity == "WARN" for d in diags))
+
 
 if __name__ == "__main__":
     unittest.main()

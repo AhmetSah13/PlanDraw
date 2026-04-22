@@ -1,0 +1,257 @@
+{
+  "file": "benchmarks\\A_expected_pass\\double_wall_L_shape.dxf",
+  "result": "PASS",
+  "failure_reason": null,
+  "recommended_actions": [],
+  "dxf_units_detected": "mm",
+  "bbox": [
+    0.0,
+    0.0,
+    8.0,
+    8.0
+  ],
+  "bbox_size": [
+    8.0,
+    8.0
+  ],
+  "total_length_m": 62.400000000000006,
+  "selected_layers": [
+    "WALLS"
+  ],
+  "recommended_step_size_raw": 0.07800000000000001,
+  "final_step_size_used": 0.07800000000000001,
+  "move_count": 831,
+  "collision_count": 0,
+  "pen_up_travel_distance": 0.282843,
+  "analyze_result": "SAFE",
+  "retry_attempts": [],
+  "strategy_succeeded": null,
+  "runtime_ms": {
+    "preview": 0.12,
+    "import": 0.19,
+    "path": 0.22,
+    "analyze": 0.39,
+    "export": 0.97
+  },
+  "export_roundtrip_ok": true,
+  "dwg_convert_runtime_ms": null,
+  "dxf_size_bytes": null,
+  "error": null,
+  "fail_reason_code": null,
+  "suite": "A",
+  "original_total_segments": 12,
+  "original_total_length_m": 62.4,
+  "post_budget_total_segments": 12,
+  "post_budget_total_length_m": 62.4,
+  "plan_length_m": 62.4,
+  "drawn_length_m": 62.400000000001,
+  "travel_length_m": 0.282842712475,
+  "path_length_m": 62.682842712475,
+  "path_overhead": 1.004533,
+  "shape_retention_plan": 1.0,
+  "shape_retention_drawn": 1.0,
+  "original_walls_candidate_length_m": 62.4,
+  "original_drawable_length_m": 62.4,
+  "retention_vs_all": 1.0,
+  "retention_vs_walls_candidate": 1.0,
+  "retention_vs_drawable": 1.0,
+  "segment_budget_applied": false,
+  "units_retry_used": false,
+  "units_retry_reason": null,
+  "units_candidates": null,
+  "units_chosen": null,
+  "units_retry_metrics": null,
+  "dxf_diagnostics": {
+    "entity_counts": {
+      "LINE": 0,
+      "LWPOLYLINE": 2,
+      "POLYLINE": 0,
+      "ARC": 0,
+      "CIRCLE": 0,
+      "SPLINE": 0,
+      "INSERT": 0,
+      "HATCH": 0,
+      "TEXT": 0,
+      "DIMENSION": 0
+    },
+    "layers": [
+      {
+        "name": "WALLS",
+        "entity_count": 2,
+        "total_length": 62.400000000000006,
+        "entity_types": []
+      }
+    ],
+    "complexity": {
+      "total_entities": 2,
+      "total_layers": 1,
+      "total_segments_after_flatten": 0,
+      "spline_count": 0,
+      "hatch_count": 0,
+      "insert_count": 0
+    },
+    "bbox": {
+      "bbox_size_world": [
+        8.0,
+        8.0
+      ],
+      "bbox_size_raw": null
+    },
+    "units": {
+      "units_detected": "mm"
+    },
+    "diagnostics_flags": []
+  },
+  "layer_intelligence": {
+    "candidate_layers": [
+      "WALLS"
+    ],
+    "selected_layers": [
+      "WALLS"
+    ],
+    "scores": {
+      "WALLS": 6.1495
+    }
+  },
+  "graph_metrics": {
+    "node_count": 12,
+    "edge_count": 12,
+    "connected_components_count": 2,
+    "connected_component_sizes": [
+      6,
+      6
+    ],
+    "degree_histogram": {
+      "0": 0,
+      "1": 0,
+      "2": 12,
+      "3+": 0
+    },
+    "intersection_count": 0,
+    "dangling_edges_count": 0,
+    "closed_cycles_count": 2,
+    "cycle_perimeters": [
+      16.0,
+      32.0,
+      16.0,
+      8.0,
+      15.2,
+      30.4,
+      15.2,
+      8.0,
+      8.0,
+      8.0,
+      8.0,
+      7.199999999999999,
+      7.199999999999999,
+      8.0
+    ],
+    "dominant_angles": {
+      "0": 6,
+      "90": 6,
+      "45": 0,
+      "135": 0,
+      "other": 0
+    },
+    "edge_length_stats": {
+      "min": 3.5999999999999996,
+      "median": 4.0,
+      "p95": 8.0
+    },
+    "wall_likeliness_score": 1.0
+  },
+  "room_candidates_count": 2,
+  "wall_candidates_count": 2,
+  "move_count_before_optimize": 831,
+  "move_count_after_optimize": 39,
+  "travel_length_before_optimize": 0.282842712475,
+  "travel_length_after_optimize": 47.049707866995,
+  "path_overhead_before_optimize": 1.004533,
+  "path_overhead_after_optimize": 1.694934,
+  "travel_reduction_pct": -16534.58,
+  "commands_baseline_metrics": {
+    "drawn_length_m": 62.400000000001,
+    "travel_length_m": 0.282842712475,
+    "path_length_m": 62.682842712475,
+    "path_overhead": 1.004533,
+    "has_pen_down": true
+  },
+  "commands_optimized_metrics": {
+    "drawn_length_m": 67.703875209643,
+    "travel_length_m": 47.049707866995,
+    "path_length_m": 114.753583076639,
+    "path_overhead": 1.694934,
+    "has_pen_down": true
+  },
+  "optimizer_decision": {
+    "used": false,
+    "reason": "TRAVEL_WORSE_FALLBACK"
+  },
+  "warnings": [
+    "Recentering applied (mode=center, dx=-4.0, dy=-4.0)."
+  ],
+  "room_candidates": [
+    {
+      "perimeter": 32.0,
+      "bbox": [
+        -4.0,
+        -4.0,
+        4.0,
+        4.0
+      ],
+      "vertex_count": 6
+    },
+    {
+      "perimeter": 30.4,
+      "bbox": [
+        -3.8,
+        -3.8,
+        3.8,
+        3.8
+      ],
+      "vertex_count": 6
+    }
+  ],
+  "wall_candidates": [
+    {
+      "length_sum": 32.0,
+      "bbox": [
+        -4.0,
+        -4.0,
+        4.0,
+        4.0
+      ],
+      "segment_count": 6,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 1.0
+    },
+    {
+      "length_sum": 30.4,
+      "bbox": [
+        -3.8,
+        -3.8,
+        3.8,
+        3.8
+      ],
+      "segment_count": 6,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 1.0
+    }
+  ],
+  "centerline_metrics": {
+    "detected_double_wall_pairs_count": 6,
+    "centerline_segments_count": 6,
+    "dropped_as_non_wall_count": 0,
+    "centerline_success_ratio": 1.0,
+    "fallback_used": true,
+    "fallback_reason": "CENTERLINE_TOO_SHORT_VS_INPUT",
+    "input_total_length_m": 62.4,
+    "centerline_total_length_m": 30.0
+  },
+  "detected_double_wall_pairs_count": 6,
+  "centerline_segments_count": 6,
+  "dropped_as_non_wall_count": 0,
+  "centerline_success_ratio": 1.0,
+  "centerline_fallback_used": true,
+  "centerline_fallback_reason": "CENTERLINE_TOO_SHORT_VS_INPUT"
+}

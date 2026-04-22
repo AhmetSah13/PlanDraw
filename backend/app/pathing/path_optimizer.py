@@ -1,7 +1,8 @@
-# path_optimizer.py — Komut sadeleştirme: kollinear, min segment, RDP
+# path_optimizer.py — Komut sadeleştirme + stroke sıralama (NN, 2-opt, reverse, join)
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
@@ -24,6 +25,15 @@ class OptimizeConfig:
     min_segment_length: float = 0.5
     rdp_epsilon: float = 0.0
     preserve_pen_lifts: bool = True
+    # Stroke sıralama ve birleştirme
+    join_epsilon_m: float = 0.001
+    max_2opt_iterations: int = 50
+    time_budget_ms: float = 5000.0
+    preserve_order_for_layers: bool = False
+    deterministic_seed: int | None = None
+    # MVP güvenlik: travel artarsa optimize'ı geri al
+    require_travel_improvement: bool = True
+    min_travel_reduction_pct: float = 0.0
 
 
 @dataclass
@@ -260,29 +270,200 @@ def segments_to_commands(segments: List[Segment]) -> List[Command]:
     return out
 
 
+def _squared_dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+    dx = b[0] - a[0]
+    dy = b[1] - a[1]
+    return dx * dx + dy * dy
+
+
+def _reorder_strokes_nn_2opt(
+    strokes: List[Segment],
+    start_pos: Tuple[float, float],
+    cfg: OptimizeConfig,
+) -> List[Tuple[List[Tuple[float, float]], bool]]:
+    """
+    Stroke'ları NN ile sırala, her stroke için başlangıç/bitiş seç (ters çevir), isteğe bağlı 2-opt.
+    Döner: [(points, reversed), ...] sıralı ve yön seçilmiş stroke listesi.
+    """
+    if not strokes or cfg.preserve_order_for_layers:
+        return [(list(s.points), False) for s in strokes]
+
+    # Her stroke için (start_pt, end_pt, points)
+    stroke_data: List[Tuple[Tuple[float, float], Tuple[float, float], List[Tuple[float, float]]]] = []
+    for s in strokes:
+        if len(s.points) < 2:
+            continue
+        stroke_data.append((s.points[0], s.points[-1], list(s.points)))
+
+    if not stroke_data:
+        return []
+
+    t0 = time.perf_counter()
+    budget_s = cfg.time_budget_ms / 1000.0
+    n = len(stroke_data)
+
+    # NN: mevcut konumdan en yakın stroke uç noktasını seç; stroke'u normal veya ters çevir
+    remaining = set(range(n))
+    current = (float(start_pos[0]), float(start_pos[1]))
+    order: List[Tuple[int, bool]] = []  # (stroke_idx, reversed)
+
+    while remaining and (time.perf_counter() - t0) < budget_s:
+        best_idx: int | None = None
+        best_rev = False
+        best_key: Tuple[float, int, float, float] = (float("inf"), 0, 0.0, 0.0)
+        for idx in remaining:
+            start_pt, end_pt, pts = stroke_data[idx]
+            d_start = _squared_dist(current, start_pt)
+            d_end = _squared_dist(current, end_pt)
+            if d_start <= d_end:
+                key = (d_start, idx, start_pt[0], start_pt[1])
+                if key < best_key:
+                    best_key = key
+                    best_idx = idx
+                    best_rev = False
+            else:
+                key = (d_end, idx, end_pt[0], end_pt[1])
+                if key < best_key:
+                    best_key = key
+                    best_idx = idx
+                    best_rev = True
+        if best_idx is None:
+            break
+        remaining.discard(best_idx)
+        order.append((best_idx, best_rev))
+        start_pt, end_pt, pts = stroke_data[best_idx]
+        current = start_pt if best_rev else end_pt
+
+    # 2-opt: stroke sırasında i,j yer değiştir; toplam travel azalıyorsa uygula
+    def total_travel(ord_list: List[Tuple[int, bool]]) -> float:
+        pos = start_pos
+        total = 0.0
+        for idx, rev in ord_list:
+            start_pt, end_pt, pts = stroke_data[idx]
+            entry = end_pt if rev else start_pt
+            total += math.sqrt(_squared_dist(pos, entry))
+            pos = start_pt if rev else end_pt
+        return total
+
+    max_iter = getattr(cfg, "max_2opt_iterations", 50) or 0
+    for _ in range(max_iter):
+        if (time.perf_counter() - t0) >= budget_s:
+            break
+        improved = False
+        for i in range(len(order)):
+            for j in range(i + 1, len(order)):
+                new_order = order[:i] + order[i : j + 1][::-1] + order[j + 1 :]
+                if total_travel(new_order) < total_travel(order):
+                    order = new_order
+                    improved = True
+                    break
+            if improved:
+                break
+        if not improved:
+            break
+
+    result: List[Tuple[List[Tuple[float, float]], bool]] = []
+    for idx, rev in order:
+        _, _, pts = stroke_data[idx]
+        result.append((list(pts), rev))
+    return result
+
+
+def _join_strokes(
+    ordered_strokes: List[Tuple[List[Tuple[float, float]], bool]],
+    epsilon: float,
+) -> List[List[Tuple[float, float]]]:
+    """Uçları epsilon içinde olan ardışık stroke'ları birleştir."""
+    if not ordered_strokes or epsilon <= 0.0:
+        return [pts if not rev else list(reversed(pts)) for pts, rev in ordered_strokes]
+
+    merged: List[List[Tuple[float, float]]] = []
+    for pts, rev in ordered_strokes:
+        seg = list(reversed(pts)) if rev else list(pts)
+        if not seg:
+            continue
+        if merged and _dist(merged[-1][-1], seg[0]) <= epsilon:
+            merged[-1].extend(seg)
+        elif merged and _dist(merged[-1][-1], seg[-1]) <= epsilon:
+            merged[-1].extend(reversed(seg))
+        else:
+            merged.append(seg)
+    return merged
+
+
 def optimize_commands(
     commands: List[Command],
     start: Tuple[float, float],
     cfg: OptimizeConfig,
 ) -> List[Command]:
     """
-    Komut listesini sadeleştirir: önce polyline segmentlere çevirir,
-    min_segment + collinear + (opsiyonel) RDP uygular, sonra tekrar komut listesine döner.
+    Komut listesini optimize eder: stroke'ları NN+2-opt ile sıralar, yön seçer, birleştirir,
+    ardından min_segment + collinear + (opsiyonel) RDP uygular.
     """
-    if not cfg.enabled or not commands:
+    if not getattr(cfg, "enabled", True) or not commands:
         return list(commands)
+
+    # Travel ölçümü: komutları segmente çevirip pen_down=False segmentlerinin uzunluğu
+    def _travel_length(cmds: List[Command]) -> float:
+        segs = commands_to_polyline_segments(cmds, start)
+        total = 0.0
+        for s in segs:
+            if s.pen_down:
+                continue
+            for i in range(len(s.points) - 1):
+                total += _dist(s.points[i], s.points[i + 1])
+        return total
+
+    travel_before = _travel_length(commands)
 
     segments = commands_to_polyline_segments(commands, start)
     if not segments:
         return list(commands)
 
-    new_segments: List[Segment] = []
-    for seg in segments:
+    strokes = [s for s in segments if s.pen_down and len(s.points) >= 2]
+    if not strokes:
+        new_segments = []
+        for seg in segments:
+            pts = list(seg.points)
+            waits = list(seg.wait_after_point) if seg.wait_after_point else [0.0] * len(pts)
+            if len(waits) < len(pts):
+                waits.extend([0.0] * (len(pts) - len(waits)))
+            if cfg.min_segment_length > 0.0:
+                pts, waits = _simplify_min_segment(pts, waits, cfg.min_segment_length)
+            if cfg.collinear_angle_eps_deg > 0.0:
+                pts, waits = _simplify_collinear(pts, waits, cfg.collinear_angle_eps_deg)
+            seg2 = Segment(pen_down=seg.pen_down, points=pts, speed=seg.speed, wait_after_point=waits[: len(pts)])
+            if cfg.rdp_epsilon > 0.0:
+                seg2 = _apply_rdp_to_segment(seg2, cfg.rdp_epsilon)
+            new_segments.append(seg2)
+        return segments_to_commands(new_segments)
+
+    join_eps = getattr(cfg, "join_epsilon_m", 0.001)
+    ordered = _reorder_strokes_nn_2opt(strokes, start, cfg)
+    joined = _join_strokes(ordered, join_eps)
+
+    # Birleştirilmiş stroke'lar + aralarında travel segmentleri
+    new_segments_list: List[Segment] = []
+    speed = strokes[0].speed if strokes else None
+    prev_end: Tuple[float, float] | None = None
+    for seg_pts in joined:
+        if not seg_pts:
+            continue
+        if prev_end is not None:
+            new_segments_list.append(
+                Segment(pen_down=False, points=[prev_end, seg_pts[0]], speed=speed, wait_after_point=[0.0, 0.0])
+            )
+        new_segments_list.append(
+            Segment(pen_down=True, points=seg_pts, speed=speed, wait_after_point=[0.0] * len(seg_pts))
+        )
+        prev_end = seg_pts[-1]
+
+    new_segments = []
+    for seg in new_segments_list:
         pts = list(seg.points)
         waits = list(seg.wait_after_point) if seg.wait_after_point else [0.0] * len(pts)
         if len(waits) < len(pts):
             waits.extend([0.0] * (len(pts) - len(waits)))
-
         if cfg.min_segment_length > 0.0:
             pts, waits = _simplify_min_segment(pts, waits, cfg.min_segment_length)
         if cfg.collinear_angle_eps_deg > 0.0:
@@ -292,4 +473,11 @@ def optimize_commands(
             seg2 = _apply_rdp_to_segment(seg2, cfg.rdp_epsilon)
         new_segments.append(seg2)
 
-    return segments_to_commands(new_segments)
+    out_cmds = segments_to_commands(new_segments)
+    travel_after = _travel_length(out_cmds)
+    if getattr(cfg, "require_travel_improvement", True) and travel_before > 0.0:
+        min_pct = float(getattr(cfg, "min_travel_reduction_pct", 0.0) or 0.0)
+        required_after = travel_before * (1.0 - min_pct / 100.0)
+        if travel_after > required_after:
+            return list(commands)
+    return out_cmds

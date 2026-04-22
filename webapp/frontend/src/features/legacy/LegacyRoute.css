@@ -1,0 +1,24 @@
+.oc-legacy-wrap {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.oc-legacy-bar {
+  flex-shrink: 0;
+  padding: var(--oc-space-xs) var(--oc-space-md);
+  border-bottom: 1px solid var(--oc-border);
+  background: var(--oc-bg-elevated);
+}
+
+.oc-legacy-bar__link {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--oc-accent);
+  text-decoration: none;
+}
+
+.oc-legacy-bar__link:hover {
+  color: var(--oc-accent-hover);
+  text-decoration: underline;
+}

@@ -145,15 +145,16 @@ class TestDxfLayerInspect(unittest.TestCase):
         info = inspect_dxf_layers(text, scale=2.0, origin=(10.0, 20.0))
         layers = info["layers"]
         walls = layers["WALLS"]
-        # Uzunluk 100 * 2 = 200 olmalı
-        self.assertAlmostEqual(walls["total_length"], 200.0)
+        # Header'da $INSUNITS yoksa mm varsayılır ve metreye çevrilir:
+        # 100 (mm) * 0.001 (m/mm) * 2.0 (scale) = 0.2 m
+        self.assertAlmostEqual(walls["total_length"], 0.2, places=6)
         # Bbox ölçek + origin'i yansıtmalı
         bbox = walls["bbox"]
         self.assertIsNotNone(bbox)
         minx, miny, maxx, maxy = bbox
         self.assertAlmostEqual(minx, 10.0)
         self.assertAlmostEqual(miny, 20.0)
-        self.assertAlmostEqual(maxx, 210.0)
+        self.assertAlmostEqual(maxx, 10.2, places=6)
         self.assertAlmostEqual(maxy, 20.0)
         # Global bbox da aynı olmalı
         gbbox = info["bbox"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Union, Optional, Literal
 
@@ -209,6 +210,12 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
     # Root komutları da REPEAT stack ile toplanır
     root_stack: List[RepeatFrame] = [(1, [], 0)]
 
+    def _finite_ok(alan: str, deger: float, line: int, raw: str) -> bool:
+        if not math.isfinite(deger):
+            emit("ERROR", line, f"{alan} geçersiz (sonlu sayı olmalı)", raw)
+            return False
+        return True
+
     lines = text.splitlines()
     for i, satir in enumerate(lines, start=1):
         ham = satir.strip()
@@ -318,6 +325,8 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
             except ValueError:
                 emit("ERROR", i, f"TURN sayısal olmalı, gelen: {parcalar[1]!r}", satir)
                 continue
+            if not _finite_ok("TURN", delta, i, satir):
+                continue
             add_cmd_to_stack(stack, TurnCommand(deg=delta))
             continue
 
@@ -330,6 +339,8 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
             except ValueError:
                 emit("ERROR", i, f"FORWARD sayısal olmalı, gelen: {parcalar[1]!r}", satir)
                 continue
+            if not _finite_ok("FORWARD", dist, i, satir):
+                continue
             add_cmd_to_stack(stack, ForwardCommand(dist=dist))
             continue
 
@@ -341,6 +352,8 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
                 hiz = float(parcalar[1])
             except ValueError:
                 emit("ERROR", i, f"SPEED sayısal olmalı, gelen: {parcalar[1]!r}", satir)
+                continue
+            if not _finite_ok("SPEED", hiz, i, satir):
                 continue
             if hiz < 0:
                 emit("WARN", i, f"Negatif SPEED ({hiz}) -> 0'a çekildi", satir)
@@ -376,6 +389,8 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
                     satir,
                 )
                 continue
+            if not _finite_ok("MOVE x", x, i, satir) or not _finite_ok("MOVE y", y, i, satir):
+                continue
             add_cmd_to_stack(stack, MoveCommand(x=x, y=y))
             continue
 
@@ -394,6 +409,8 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
                     satir,
                 )
                 continue
+            if not _finite_ok("MOVE_REL dx", dx, i, satir) or not _finite_ok("MOVE_REL dy", dy, i, satir):
+                continue
             add_cmd_to_stack(stack, MoveRelCommand(dx=dx, dy=dy))
             continue
 
@@ -405,6 +422,8 @@ def parse_commands(text: str, *, strict: bool = False) -> Tuple[List[Command], L
                 secs = float(parcalar[1])
             except ValueError:
                 emit("ERROR", i, f"WAIT sayısal olmalı, gelen: {parcalar[1]!r}", satir)
+                continue
+            if not _finite_ok("WAIT", secs, i, satir):
                 continue
             if secs < 0:
                 emit("WARN", i, f"Negatif WAIT ({secs}) -> 0'a çekildi", satir)

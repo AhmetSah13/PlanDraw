@@ -1,0 +1,30 @@
+{
+  "total": 2,
+  "PASS": 2,
+  "WARN": 0,
+  "FAIL": 0,
+  "PASS_AFTER_RETRY": 0,
+  "FAIL_AFTER_RETRY": 0,
+  "failure_reasons": {},
+  "by_suite": {
+    "B": {
+      "PASS": 2,
+      "WARN": 0,
+      "FAIL": 0,
+      "median_shape_retention_plan": 0.649791,
+      "median_shape_retention_drawn": 0.649791
+    }
+  },
+  "budget_too_much_loss_count_C": 0,
+  "fail_reason_codes_top": [],
+  "in_scope_total": 1,
+  "in_scope_PASS": 1,
+  "in_scope_WARN": 0,
+  "in_scope_FAIL": 0,
+  "out_scope_total": 1,
+  "out_scope_by_class": {
+    "OUT_OF_SCOPE_UNITS_UNCERTAIN": 1
+  },
+  "in_scope_median_retention_vs_walls_candidate": 0.999445,
+  "in_scope_median_path_overhead": 1.227241
+}

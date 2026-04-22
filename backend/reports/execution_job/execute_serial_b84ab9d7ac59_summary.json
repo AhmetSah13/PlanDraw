@@ -1,0 +1,14 @@
+{
+  "command_count": 76,
+  "alignment_blocked": null,
+  "allow_execution_when_alignment_blocked": false,
+  "dry_run": true,
+  "start_xy": [
+    0.0,
+    0.0
+  ],
+  "stroke_count": null,
+  "total_draw_m": null,
+  "total_travel_m": null,
+  "driver_kind": "dry_run"
+}

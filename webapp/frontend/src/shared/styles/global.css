@@ -1,0 +1,36 @@
+@import "../../ui/design.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body { -webkit-font-smoothing: antialiased; }
+
+a {
+  color: var(--oc-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--oc-accent-hover);
+  text-decoration: underline;
+}
+
+.oc-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #0c1017;
+  border: 1px solid #2b3444;
+  color: #e7edf7;
+}

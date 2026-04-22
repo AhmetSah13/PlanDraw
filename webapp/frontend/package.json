@@ -1,18 +1,30 @@
 {
-  "name": "plandraw-frontend",
+  "name": "plandraw-frontend-legacy",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build"
+    "preinstall": "node -e \"console.error('LEGACY FREEZE: Bu klasörde npm install yasak. Aktif frontend: webapp/operator-v2'); process.exit(1)\"",
+    "dev": "node -e \"console.error('LEGACY: Aktif frontend webapp/operator-v2 klasörüdür.'); process.exit(1)\"",
+    "build": "node -e \"console.error('LEGACY: Build için webapp/operator-v2 kullanın.'); process.exit(1)\"",
+    "test": "node -e \"console.error('LEGACY: Test için webapp/operator-v2 kullanın.'); process.exit(1)\"",
+    "lint": "node -e \"console.error('LEGACY: Lint için webapp/operator-v2 kullanın.'); process.exit(1)\"",
+    "e2e": "node -e \"console.error('LEGACY: E2E için webapp/operator-v2 kullanın.'); process.exit(1)\""
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.9.1",
+    "@tanstack/react-query": "^5.99.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.53.1",
+    "react-router-dom": "^6.28.0",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.2"
+    "typescript": "^5.6.3",
+    "vite": "^5.4.2",
+    "vitest": "^2.1.8"
   }
 }

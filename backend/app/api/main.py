@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import math
 import random
+import secrets
+import os
 import sys
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -15,12 +20,13 @@ if str(_root) not in sys.path:
 
 from typing import List, Optional, Tuple
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import ValidationError
 
 from app.execution.commands import (
+    Command,
     CommandParseError,
     Diagnostic,
     MoveCommand,
@@ -28,28 +34,44 @@ from app.execution.commands import (
     serialize_commands,
 )
 from app.analysis.scenario_analysis import analyze_commands, export_commands_to_string, ScenarioLimits
+from app.analysis.geometry_graph import enrich_plan_with_graph_metrics
 from app.execution.executor import CommandExecutor
 from app.core.plan_module import load_plan_from_string
 from app.pathing.path_generator import PathGenerator
 from app.execution.compiler import compile_path_to_commands
-from app.pathing.path_optimizer import optimize_commands, OptimizeConfig
+from app.pathing.path_optimizer import OptimizeConfig
 
 from app.normalization.normalized_plan import import_plan_from_json
 from app.normalization.plan_normalizer import NormalizeOptions, normalize_plan
 from app.importers.plan_importer import normalized_to_plan, normalized_to_plan_text, normalized_to_walls_array
-from app.importers.dxf_importer import dxf_to_normalized_plan, inspect_dxf_layers
-from app.importers.dwg_converter import convert_dwg_bytes_to_dxf_text, DwgConversionError
+from app.importers.dxf_importer import (
+    dxf_bytes_to_normalized_plan,
+    dxf_to_normalized_plan,
+    inspect_dxf_layers,
+    inspect_dxf_layers_bytes,
+    analyze_dxf_structure,
+    select_plan_layers,
+)
+from app.importers.dwg_converter import (
+    convert_dwg_bytes_to_dxf_bytes,
+    convert_dwg_bytes_to_dxf_text,
+    DwgConversionError,
+)
 
 from app.utils.motion_model import MotionConfig, MotionState, apply_motion
 from app.api.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     DiagnosticOut,
+    DxfInsightReport,
     StatsOut,
     SimulateRequest,
+    JobFileArtifactRequest,
     CompilePlanRequest,
     OptimizeConfigOut,
     MotionConfigOut,
+    ExecuteSerialRequest,
+    ExecuteSerialResponse,
     ExportRequest,
     ExportResponse,
     CollisionOut,
@@ -58,19 +80,214 @@ from app.api.schemas import (
     ImportDxfOptions,
     NormalizedPlanIn,
     LayerStats,
+    AlignRigid2dRequest,
 )
 
 
 from app.utils.step_size_utils import preview_recommended_step_size as _preview_recommended_step_size
 
+from app.alignment.aligner import align_printable_layout_rigid_2d
+from app.alignment.alignment_model import ControlPoint, alignment_report_to_jsonable
+from app.alignment.walls_to_layout import walls_list_to_printable_layout
+from app.preview.preview_svg import render_post_alignment_svg, render_pre_alignment_svg
+from app.drivers.file_driver import FileDriver
+from app.execution.driver_dispatch import dispatch_commands
+from app.execution.job_model import ExecutionContext, ExecutionJobOptions, ExecutionResult
+from app.execution.job_runner import run_command_execution_job
+from app.api.job_command_prep import apply_optional_optimize_to_commands, prepare_job_commands
+
 app = FastAPI(title="PlanDraw Web Backend", version="0.1.0")
 
 jobs: dict = {}  # job_id -> {"task": asyncio.Task, "queue": asyncio.Queue}
 
-# Frontend: Vite default port 5173 (localhost + 127.0.0.1)
+# Upload güvenliği: maksimum dosya boyutu (bytes). Varsayılan 20 MB.
+# Not: Bu bir “ürün güvenliği” değil, demo/DoS koruması için basit bir guard.
+MAX_UPLOAD_BYTES: int = int(os.getenv("MAX_UPLOAD_BYTES", "20000000"))
+
+# Job FileDriver çıktıları (POST /api/jobs, file_artifact.enabled). Varsayılan: backend/out/job_artifacts/
+JOB_FILE_ARTIFACT_ROOT_ENV = "JOB_FILE_ARTIFACT_ROOT"
+
+
+def _job_file_artifact_root() -> Path:
+    raw = os.getenv(JOB_FILE_ARTIFACT_ROOT_ENV)
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return (_root / "out" / "job_artifacts").resolve()
+
+
+def _write_job_file_artifact_sync(
+    commands: List[Command],
+    start_pt: Tuple[float, float],
+    job_id: str,
+    mode: str,
+    artifact_root: Path,
+) -> dict:
+    """FileDriver + dispatch_commands; bloklayıcı I/O — run_in_executor içinde çağrılmalı."""
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    suffix = ".dsl.txt" if mode == "dsl" else ".robot_v1.txt"
+    out_path = (artifact_root / f"{job_id}{suffix}").resolve()
+    driver = FileDriver(out_path, mode=mode)
+    dispatch_commands(commands, start=start_pt, driver=driver, metadata={"job_id": job_id})
+    st = driver.get_status()
+    return {
+        "path": str(out_path),
+        "mode": mode,
+        "last_write_succeeded": bool(st.get("last_write_succeeded")),
+        "last_error": st.get("last_error"),
+        "last_command_count": st.get("last_command_count"),
+    }
+
+
+# POST /api/execute_serial: gerçek UART için SERIAL_PORT / SERIAL_BAUD (yalnızca env).
+EXECUTE_SERIAL_ARTIFACT_DIR_ENV = "EXECUTE_SERIAL_ARTIFACT_DIR"
+EXECUTE_SERIAL_ALLOW_REMOTE_ENV = "EXECUTE_SERIAL_ALLOW_REMOTE"
+EXECUTE_SERIAL_ADMIN_TOKEN_ENV = "EXECUTE_SERIAL_ADMIN_TOKEN"
+EXECUTE_SERIAL_TOKEN_HEADER = "x-execute-token"
+
+
+def _execute_serial_artifact_dir() -> Optional[str]:
+    raw = os.getenv(EXECUTE_SERIAL_ARTIFACT_DIR_ENV)
+    if not raw or not str(raw).strip():
+        return None
+    return str(raw).strip()
+
+
+def _execute_serial_allow_remote_from_env() -> bool:
+    """True ise istemci IP kısıtı uygulanmaz (ters proxy / uzak erişim senaryosu)."""
+    v = os.getenv(EXECUTE_SERIAL_ALLOW_REMOTE_ENV, "false").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _execute_serial_admin_token_expected() -> Optional[str]:
+    """Tanımlı ve boş değilse tüm isteklerde X-Execute-Token zorunlu."""
+    raw = os.getenv(EXECUTE_SERIAL_ADMIN_TOKEN_ENV)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s if s else None
+
+
+def _execute_serial_peer_host(request: Request) -> str:
+    if request.client is None:
+        return ""
+    return (request.client.host or "").strip().lower()
+
+
+def _execute_serial_is_trusted_local_host(host: str) -> bool:
+    """Loopback + Starlette TestClient varsayılanı ``testclient``."""
+    h = (host or "").strip().lower()
+    if h in ("127.0.0.1", "localhost", "::1", "testclient"):
+        return True
+    if h.startswith("::ffff:127.0.0.1"):
+        return True
+    return False
+
+
+def _execute_serial_host_check_passes(request: Request) -> bool:
+    if _execute_serial_allow_remote_from_env():
+        return True
+    return _execute_serial_is_trusted_local_host(_execute_serial_peer_host(request))
+
+
+def _execute_serial_token_check_passes(request: Request) -> bool:
+    expected = _execute_serial_admin_token_expected()
+    if expected is None:
+        return True
+    got = request.headers.get("X-Execute-Token") or request.headers.get(EXECUTE_SERIAL_TOKEN_HEADER)
+    if got is None:
+        return False
+    try:
+        return secrets.compare_digest(got.encode("utf-8"), expected.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+def _execute_serial_access_guard(request: Request) -> Optional[JSONResponse]:
+    """
+    1) Loopback / allow_remote
+    2) Opsiyonel admin token
+
+    Başarısızda 403 ve ``ExecuteSerialResponse`` gövdesi (command_count=0).
+    """
+    if not _execute_serial_host_check_passes(request):
+        body = ExecuteSerialResponse(
+            status="failed",
+            message="Bu uç yalnızca yerel (loopback) isteklere açıktır; EXECUTE_SERIAL_ALLOW_REMOTE ile genişletilebilir.",
+            command_count=0,
+            error_detail="EXECUTE_SERIAL_LOCALHOST_ONLY",
+        )
+        return JSONResponse(status_code=403, content=body.model_dump())
+    if not _execute_serial_token_check_passes(request):
+        body = ExecuteSerialResponse(
+            status="failed",
+            message="Geçerli X-Execute-Token başlığı gerekli (EXECUTE_SERIAL_ADMIN_TOKEN).",
+            command_count=0,
+            error_detail="EXECUTE_SERIAL_INVALID_TOKEN",
+        )
+        return JSONResponse(status_code=403, content=body.model_dump())
+    return None
+
+
+# dry_run=False: aynı anda tek canlı gönderim (UART çakışmasını önler).
+_execute_serial_live_lock = threading.Lock()
+
+
+def _serial_live_env_ok() -> tuple[bool, str]:
+    """dry_run=False için SERIAL_PORT zorunlu; istek gövdesinde port kabul edilmez."""
+    port = os.getenv("SERIAL_PORT", "").strip()
+    if not port:
+        return False, "SERIAL_PORT tanımlı değil; gerçek gönderim reddedildi."
+    return True, port
+
+
+def _parse_serial_baud_from_env() -> tuple[int | None, str | None]:
+    """
+    SERIAL_BAUD: pozitif ondalık tamsayı. Tanımsızsa 115200.
+    Geçersiz veya boş string → (None, açıklama).
+    """
+    raw = os.getenv("SERIAL_BAUD")
+    if raw is None:
+        return 115200, None
+    s = str(raw).strip()
+    if not s:
+        return None, "SERIAL_BAUD boş; geçerli pozitif bir tam sayı beklenir."
+    try:
+        v = int(s, 10)
+    except ValueError:
+        return None, f"SERIAL_BAUD geçersiz: {raw!r}"
+    if v <= 0:
+        return None, "SERIAL_BAUD pozitif olmalıdır."
+    return v, None
+
+
+def _build_serial_driver_for_execute(*, baudrate: int) -> "SerialDriver":
+    """_serial_live_env_ok ve baud doğrulaması sonrası; kilitleme altında çağrılmalı."""
+    from app.drivers.serial_driver import SerialDriver
+
+    port = os.environ["SERIAL_PORT"].strip()
+    return SerialDriver(port, baudrate=int(baudrate))
+
+
+def _execution_result_to_serial_response(r: ExecutionResult) -> ExecuteSerialResponse:
+    return ExecuteSerialResponse(
+        status=r.status,
+        message=r.message,
+        command_count=r.command_count,
+        driver_status=r.driver_status,
+        error_detail=r.error_detail,
+        artifact_paths=list(r.artifact_paths),
+        notes=list(r.notes),
+    )
+
+
+# Resmi yerel standart:
+# - Operator V2: http://127.0.0.1:5173 (ve localhost eşdeğeri)
+# CORS listesi tek kaynaktan yönetilir; env ile ek origin verilebilir.
+DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:5173", "http://localhost:5173"]
+extra_cors = [s.strip() for s in os.getenv("BACKEND_CORS_ORIGINS_EXTRA", "").split(",") if s.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=DEFAULT_CORS_ORIGINS + extra_cors,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,6 +319,11 @@ def _optimize_cfg_from_request(o: Optional[OptimizeConfigOut]) -> Optional[Optim
         min_segment_length=float(getattr(o, "min_segment_length", 0.5)),
         rdp_epsilon=float(getattr(o, "rdp_epsilon", 0.0)),
         preserve_pen_lifts=True,
+        join_epsilon_m=float(getattr(o, "join_epsilon_m", 0.001)),
+        max_2opt_iterations=int(getattr(o, "max_2opt_iterations", 50)),
+        time_budget_ms=float(getattr(o, "time_budget_ms", 5000.0)),
+        preserve_order_for_layers=bool(getattr(o, "preserve_order_for_layers", False)),
+        deterministic_seed=int(o.deterministic_seed) if getattr(o, "deterministic_seed", None) is not None else None,
     )
 
 
@@ -155,9 +377,71 @@ def _limits_from_text(text: str) -> Optional[ScenarioLimits]:
     )
 
 
+def _read_upload_bytes_limited(file: UploadFile, *, max_bytes: int) -> bytes:
+    """
+    UploadFile içeriğini limitli okur.
+    Limit aşılırsa ValueError fırlatır (endpoint bunu ok=False ile döndürür).
+    """
+    if max_bytes <= 0:
+        raise ValueError("Sunucu dosya yüklemeyi kapattı (MAX_UPLOAD_BYTES=0).")
+    buf = bytearray()
+    chunk_size = 1024 * 1024  # 1 MB
+    try:
+        while True:
+            chunk = file.file.read(chunk_size)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if len(buf) > max_bytes:
+                raise ValueError(
+                    f"Dosya boyutu çok büyük: {len(buf)} bayt > {max_bytes} bayt (limit)."
+                )
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Dosya okunamadı: {e!s}") from e
+    return bytes(buf)
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/api/status")
+def status():
+    """
+    Demo güvenilirliği için küçük durum endpoint'i.
+    Not: Endpoint sözleşmelerini bozmak için değil; sadece "DWG hazır mı?" bilgisini görünür kılmak için.
+    """
+    dwg_path = os.getenv("DWG_CONVERTER_PATH") or ""
+    dwg_args = os.getenv("DWG_CONVERTER_ARGS") or ""
+
+    available = False
+    reason = ""
+    converter_hint = None
+
+    if not dwg_path.strip():
+        reason = "DWG dönüştürücü yapılandırılmadı (DWG_CONVERTER_PATH yok)."
+    else:
+        p = Path(dwg_path)
+        if p.exists():
+            available = True
+            reason = "DWG dönüştürücü hazır."
+            # Güvenlik: tam path döndürmek yerine sadece isim/hint.
+            converter_hint = p.name
+        else:
+            reason = "DWG dönüştürücü dosyası bulunamadı (DWG_CONVERTER_PATH geçersiz)."
+            converter_hint = p.name
+
+    payload = {
+        "ok": True,
+        "dwg_converter_available": bool(available),
+        "dwg_converter_reason": str(reason),
+        "dwg_converter_hint": converter_hint,
+        "dwg_converter_args_configured": bool(bool(dwg_args.strip())),
+    }
+    return payload
 
 
 @app.post("/api/import_plan", response_model=ImportPlanResponse)
@@ -186,6 +470,8 @@ def import_plan(req: NormalizedPlanIn) -> ImportPlanResponse:
                 )
             normalized, norm_warnings = normalize_plan(normalized, opts)
             warnings.extend(norm_warnings)
+
+        normalized = enrich_plan_with_graph_metrics(normalized)
 
         plan_text_out: Optional[str] = None
         commands_text_out: Optional[str] = None
@@ -251,22 +537,15 @@ def import_dxf(
     options_json: Optional[str] = Form(None),
 ) -> ImportDxfResponse:
     """
-    DXF dosyası yükler (multipart), ASCII/UTF-8 metin bekler.
+    DXF dosyası yükler (multipart). ezdxf varsa ASCII/Binary destekler.
     /api/import_plan ile aynı yanıt şekli: ok/error/normalized/warnings + plan_text/commands_text/walls/raw_path_points.
     """
     try:
-        raw = file.file.read()
-    except Exception as e:
-        return ImportDxfResponse(ok=False, error=f"Dosya okunamadı: {e!s}", normalized=None, warnings=[])
-    try:
-        text = raw.decode("utf-8", errors="strict")
-    except UnicodeDecodeError:
-        return ImportDxfResponse(
-            ok=False,
-            error="DXF must be ASCII/UTF-8 text",
-            normalized=None,
-            warnings=[],
-        )
+        raw = _read_upload_bytes_limited(file, max_bytes=MAX_UPLOAD_BYTES)
+    except ValueError as e:
+        return ImportDxfResponse(ok=False, error=str(e), normalized=None, warnings=[])
+    # Not: Eski sürüm UTF-8 metin zorunluydu. Artık ezdxf varsa ASCII/Binary fark etmez.
+    # Bu yüzden importer'a ham bytes veriyoruz; ezdxf yoksa importer UTF-8 decode ile fallback yapar.
     try:
         if options_json:
             opts_dict = json.loads(options_json)
@@ -287,11 +566,15 @@ def import_dxf(
     # Önce sadece layer önizleme istenmiş mi kontrol et
     if options.preview_layers:
         try:
-            info = inspect_dxf_layers(
-                text,
+            info = inspect_dxf_layers_bytes(
+                raw,
                 units=options.units_override,
                 scale=options.scale_override,
                 origin=(0.0, 0.0),
+                chord_tolerance_m=options.chord_tolerance_m,
+                target_max_segments=options.preprocess_target_max_segments,
+                max_insert_depth=options.max_insert_depth,
+                explode_blocks=options.explode_blocks,
             )
         except ValueError as e:
             return ImportDxfResponse(ok=False, error=str(e), normalized=None, warnings=[])
@@ -319,6 +602,18 @@ def import_dxf(
             info.get("bbox"),
         )
 
+        dxf_insight = DxfInsightReport(
+            entity_counts_total=info.get("entity_counts_total"),
+            entity_counts_supported=info.get("entity_counts_supported"),
+            entity_counts_unsupported=info.get("entity_counts_unsupported"),
+            unsupported_samples=info.get("unsupported_samples"),
+            layer_entity_counts=info.get("layer_entity_counts"),
+            layer_scores=info.get("layer_scores"),
+            suggested_layers_reasons=info.get("suggested_layers_reasons"),
+            parse_warnings=info.get("parse_warnings"),
+            warning_codes=info.get("warning_codes"),
+            recommended_action=info.get("recommended_action"),
+        )
         return ImportDxfResponse(
             ok=True,
             error=None,
@@ -335,6 +630,7 @@ def import_dxf(
             world_scale=info.get("world_scale"),
             world_bbox_m=info.get("bbox"),
             world_total_length_m=info.get("total_length"),
+            dxf_insight=dxf_insight,
         )
 
     # Normal DXF import (plan üretimi)
@@ -342,18 +638,45 @@ def import_dxf(
     if options.selected_layers:
         if isinstance(options.selected_layers, list) and len(options.selected_layers) > 0:
             layer_whitelist = options.selected_layers
+    # Kullanıcı katman seçmemişse: layer intelligence ile otomatik seçim
+    if layer_whitelist is None or (isinstance(layer_whitelist, list) and len(layer_whitelist) == 0):
+        try:
+            diagnostics = analyze_dxf_structure(raw)
+            li = select_plan_layers(diagnostics)
+            auto_layers = li.get("selected_layers") or []
+            if auto_layers:
+                layer_whitelist = auto_layers
+        except Exception:
+            pass
 
     try:
-        normalized = dxf_to_normalized_plan(
-            text,
+        normalized = dxf_bytes_to_normalized_plan(
+            raw,
             units=options.units_override,
             scale=options.scale_override,
             origin=(0.0, 0.0),
             layer_whitelist=layer_whitelist,
             layer_blacklist=options.layer_blacklist,
+            chord_tolerance_m=options.chord_tolerance_m,
+            target_max_segments=options.preprocess_target_max_segments,
+            max_insert_depth=options.max_insert_depth,
+            explode_blocks=options.explode_blocks,
         )
     except ValueError as e:
         return ImportDxfResponse(ok=False, error=str(e), normalized=None, warnings=[])
+    except Exception as e:
+        # Ezdxf seviyesinde bozuk/uyumsuz dosyalar 500 üretmek yerine
+        # operatöre açıklayıcı bir kullanıcı hatası döndürülür.
+        return ImportDxfResponse(
+            ok=False,
+            error=(
+                "DXF dosyası okunamadı veya yapısı desteklenmiyor. "
+                "Mümkünse dosyayı CAD aracında onarıp yeniden kaydedin "
+                "(tercihen R12/R2000 ASCII DXF) ve tekrar deneyin."
+            ),
+            normalized=None,
+            warnings=[f"Teknik detay: {str(e)}"] if str(e) else [],
+        )
 
     warnings: List[str] = []
     if options.normalize:
@@ -377,6 +700,8 @@ def import_dxf(
         opts.budget_strategy = getattr(options, "budget_strategy", opts.budget_strategy)
         normalized, norm_warnings = normalize_plan(normalized, opts)
         warnings.extend(norm_warnings)
+
+    normalized = enrich_plan_with_graph_metrics(normalized)
 
     plan_text_out: Optional[str] = None
     commands_text_out: Optional[str] = None
@@ -455,13 +780,21 @@ def import_dwg(
         return ImportDxfResponse(ok=False, error=msg, normalized=None, warnings=[])
 
     try:
-        raw = file.file.read()
-    except Exception as e:
-        return ImportDxfResponse(ok=False, error=f"Dosya okunamadı: {e!s}", normalized=None, warnings=[])
+        raw = _read_upload_bytes_limited(file, max_bytes=MAX_UPLOAD_BYTES)
+    except ValueError as e:
+        return ImportDxfResponse(ok=False, error=str(e), normalized=None, warnings=[])
 
     timeout = max(1.0, min(3600.0, float(options.convert_timeout_seconds)))
+    dxf_bytes: bytes
+    dwg_runtime_ms: float | None = None
+    dxf_size_bytes: int | None = None
     try:
-        dxf_text = convert_dwg_bytes_to_dxf_text(raw, timeout_seconds=timeout)
+        import time as _time
+
+        t0 = _time.perf_counter()
+        dxf_bytes = convert_dwg_bytes_to_dxf_bytes(raw, timeout_seconds=timeout)
+        dwg_runtime_ms = (_time.perf_counter() - t0) * 1000.0
+        dxf_size_bytes = len(dxf_bytes)
     except DwgConversionError as e:
         return ImportDxfResponse(ok=False, error=str(e), normalized=None, warnings=[])
     except Exception as e:
@@ -472,11 +805,11 @@ def import_dwg(
             warnings=[],
         )
 
-    # DWG için de preview_layers desteği
+    # DWG için de preview_layers desteği (DXF bytes üzerinden)
     if options.preview_layers:
         try:
-            info = inspect_dxf_layers(
-                dxf_text,
+            info = inspect_dxf_layers_bytes(
+                dxf_bytes,
                 units=options.units_override,
                 scale=options.scale_override,
                 origin=(0.0, 0.0),
@@ -506,6 +839,18 @@ def import_dwg(
             info.get("bbox"),
         )
 
+        dxf_insight = DxfInsightReport(
+            entity_counts_total=info.get("entity_counts_total"),
+            entity_counts_supported=info.get("entity_counts_supported"),
+            entity_counts_unsupported=info.get("entity_counts_unsupported"),
+            unsupported_samples=info.get("unsupported_samples"),
+            layer_entity_counts=info.get("layer_entity_counts"),
+            layer_scores=info.get("layer_scores"),
+            suggested_layers_reasons=info.get("suggested_layers_reasons"),
+            parse_warnings=info.get("parse_warnings"),
+            warning_codes=info.get("warning_codes"),
+            recommended_action=info.get("recommended_action"),
+        )
         return ImportDxfResponse(
             ok=True,
             error=None,
@@ -522,26 +867,55 @@ def import_dwg(
             world_scale=info.get("world_scale"),
             world_bbox_m=info.get("bbox"),
             world_total_length_m=info.get("total_length"),
+            dxf_insight=dxf_insight,
+            dwg_convert_runtime_ms=dwg_runtime_ms,
+            dxf_size_bytes=dxf_size_bytes,
         )
 
     # options_json -> ImportDxfOptions (zaten yukarıda yapıldı)
-    # DXF pipeline'ı aynen /api/import_dxf ile aynı
+    # DXF bytes pipeline'ı aynen /api/import_dxf ile aynı
     layer_whitelist = options.layer_whitelist
     if options.selected_layers:
         if isinstance(options.selected_layers, list) and len(options.selected_layers) > 0:
             layer_whitelist = options.selected_layers
+    if layer_whitelist is None or (isinstance(layer_whitelist, list) and len(layer_whitelist) == 0):
+        try:
+            diagnostics = analyze_dxf_structure(dxf_bytes)
+            li = select_plan_layers(diagnostics)
+            auto_layers = li.get("selected_layers") or []
+            if auto_layers:
+                layer_whitelist = auto_layers
+        except Exception:
+            pass
 
     try:
-        normalized = dxf_to_normalized_plan(
-            dxf_text,
+        normalized = dxf_bytes_to_normalized_plan(
+            dxf_bytes,
             units=options.units_override,
             scale=options.scale_override,
             origin=(0.0, 0.0),
             layer_whitelist=layer_whitelist,
             layer_blacklist=options.layer_blacklist,
+            chord_tolerance_m=options.chord_tolerance_m,
+            target_max_segments=options.preprocess_target_max_segments,
+            max_insert_depth=options.max_insert_depth,
+            explode_blocks=options.explode_blocks,
         )
     except ValueError as e:
         return ImportDxfResponse(ok=False, error=str(e), normalized=None, warnings=[])
+    except Exception as e:
+        # Bozuk/uyumsuz DXF içeriğini 500 ile düşürmek yerine
+        # operatöre açıklayıcı bir kullanıcı hatası döndür.
+        return ImportDxfResponse(
+            ok=False,
+            error=(
+                "DXF dosyası okunamadı veya yapısı desteklenmiyor. "
+                "Mümkünse dosyayı CAD aracında onarıp yeniden kaydedin "
+                "(tercihen R12/R2000 ASCII DXF) ve tekrar deneyin."
+            ),
+            normalized=None,
+            warnings=[f"Teknik detay: {str(e)}"] if str(e) else [],
+        )
 
     warnings: List[str] = []
     if options.normalize:
@@ -564,6 +938,8 @@ def import_dwg(
         opts.budget_strategy = getattr(options, "budget_strategy", opts.budget_strategy)
         normalized, norm_warnings = normalize_plan(normalized, opts)
         warnings.extend(norm_warnings)
+
+    normalized = enrich_plan_with_graph_metrics(normalized)
 
     plan_text_out: Optional[str] = None
     commands_text_out: Optional[str] = None
@@ -611,29 +987,20 @@ def import_dwg(
         walls=walls_out,
         raw_path_points=raw_path_points_out,
         recommended_step_size=recommended_step_size,
+        dwg_convert_runtime_ms=dwg_runtime_ms,
+        dxf_size_bytes=dxf_size_bytes,
     )
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     text = req.commands_text or ""
-
-    # 1) Parse (strict=False => diagnostics ile döner)
-    try:
-        commands, parser_diags = parse_commands(text, strict=False)
-    except CommandParseError as e:
-        commands = []
-        parser_diags = [e.diagnostic]
-
-    # 2) Start noktası (request'ten veya ilk MOVE'dan; yoksa default (0,0))
-    start = req.start
-    if start is None:
-        start = _find_start_from_commands(commands)
-    if start is None:
-        start = (0.0, 0.0)
-
-    # 3) Analysis (opsiyonel optimize ile)
     optimize_cfg = _optimize_cfg_from_request(req.optimize)
+    prep = prepare_job_commands(text, explicit_start=req.start, optimize_cfg=optimize_cfg)
+    commands = prep.commands
+    parser_diags = prep.parser_diags
+    start_pt = prep.start_pt
+
     walls = getattr(req, "walls", None)
     collision_mode = getattr(req, "collision_mode", "warn")
     analysis_diags: List[Diagnostic] = []
@@ -642,8 +1009,8 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     if commands:
         stats, analysis_diags = analyze_commands(
             commands,
-            start=start,
-            optimize_cfg=optimize_cfg,
+            start=start_pt,
+            optimize_cfg=None,
             walls=walls,
             collision_mode=collision_mode,
         )
@@ -654,9 +1021,13 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             path_length=stats.path_length,
             estimated_time=stats.estimated_time,
             path_points=stats.path_points,
-            original_move_count=stats.original_move_count,
-            optimized_move_count=stats.optimized_move_count,
-            reduction_ratio=stats.reduction_ratio,
+            original_move_count=prep.original_move_count
+            if prep.original_move_count is not None
+            else stats.original_move_count,
+            optimized_move_count=prep.optimized_move_count
+            if prep.optimized_move_count is not None
+            else stats.optimized_move_count,
+            reduction_ratio=prep.reduction_ratio if prep.reduction_ratio is not None else stats.reduction_ratio,
             collision_count=stats.collision_count,
             collisions_sample=[
                 CollisionOut(
@@ -674,18 +1045,11 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             wall_proper_cross_count=getattr(stats, "wall_proper_cross_count", 0),
         )
 
-    # 4) Blocked kararı
     parser_error_count = sum(1 for d in parser_diags if d.severity == "ERROR")
     analysis_error_count = sum(1 for d in analysis_diags if d.severity == "ERROR")
     blocked = (parser_error_count > 0) or (analysis_error_count > 0)
 
-    # 5) Unrolled komutları UI'de göstermek için (optimize açıksa optimize edilmiş liste)
-    commands_to_show = (
-        optimize_commands(commands, start, optimize_cfg)
-        if optimize_cfg and optimize_cfg.enabled
-        else commands
-    )
-    commands_unrolled = serialize_commands(commands_to_show)
+    commands_unrolled = serialize_commands(commands)
 
     return AnalyzeResponse(
         blocked=blocked,
@@ -697,24 +1061,74 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
 
 
 MAX_SIM_STEPS = 200_000
+JOB_QUEUE_MAXSIZE = int(os.getenv("JOB_QUEUE_MAXSIZE", "1024"))
+JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "900"))
+
+
+def _drop_one_tick_if_possible(queue: asyncio.Queue) -> bool:
+    """
+    Queue dolduğunda önce eski tick event'lerini düşürmeyi dener.
+    Not: asyncio.Queue iç yapısındaki deque kullanımı, minimum-risk demo guard'ı için tercih edildi.
+    """
+    inner = getattr(queue, "_queue", None)
+    if inner is None:
+        return False
+    try:
+        for idx, item in enumerate(inner):
+            if isinstance(item, tuple) and len(item) >= 1 and item[0] == "tick":
+                del inner[idx]
+                return True
+    except Exception:
+        return False
+    return False
+
+
+async def _safe_enqueue_event(
+    queue: asyncio.Queue,
+    event_type: Optional[str],
+    data: Optional[dict],
+) -> None:
+    """
+    Queue'ya güvenli event yazar.
+    - tick için: doluysa eski tick düşürüp yeniyi alır.
+    - done/error/sentinel için: mümkünse tick düşürür; gerekirse en eskiyi düşürüp terminal event'i yazar.
+    """
+    item = (event_type, data)
+    while True:
+        try:
+            queue.put_nowait(item)
+            return
+        except asyncio.QueueFull:
+            dropped = _drop_one_tick_if_possible(queue)
+            if not dropped:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    await asyncio.sleep(0)
+                    continue
+
+
+def _sweep_jobs_ttl(now_ts: float) -> None:
+    """Biten veya TTL'i aşan job kayıtlarını temizler (hafif, create_job sırasında çağrılır)."""
+    for jid, job in list(jobs.items()):
+        task = job.get("task")
+        created_at = float(job.get("created_at", now_ts))
+        expired = (now_ts - created_at) > float(JOB_TTL_SECONDS)
+        done = task.done() if task is not None else True
+        if done or expired:
+            if task is not None and (not task.done()) and expired:
+                task.cancel()
+            jobs.pop(jid, None)
 
 
 async def _simulate_event_stream(
-    text: str,
+    commands: List[Command],
     dt: float,
     speed_multiplier: float,
     start_pt: Tuple[float, float],
-    optimize_cfg: Optional[OptimizeConfig] = None,
     motion_cfg: Optional[MotionConfig] = None,
 ):
     """SSE event stream: tick (ideal/real/error) + done. motion_cfg ile drift/noise uygulanır."""
-    try:
-        commands, _ = parse_commands(text or "", strict=False)
-    except CommandParseError:
-        commands = []
-    if optimize_cfg and optimize_cfg.enabled:
-        commands = optimize_commands(commands, start_pt, optimize_cfg)
-
     mult = max(0.1, min(5.0, float(speed_multiplier)))
     executor = CommandExecutor(commands)
     ideal_pos = (float(start_pt[0]), float(start_pt[1]))
@@ -784,21 +1198,17 @@ async def _simulate_event_stream(
 
 
 async def _run_sim_to_queue(
-    text: str,
+    commands: List[Command],
     dt: float,
     speed_multiplier: float,
     start_pt: Tuple[float, float],
     queue: asyncio.Queue,
-    optimize_cfg: Optional[OptimizeConfig] = None,
     motion_cfg: Optional[MotionConfig] = None,
+    *,
+    job_id: Optional[str] = None,
+    file_artifact_opt: Optional[JobFileArtifactRequest] = None,
 ) -> None:
-    """Simülasyonu queue'ya event olarak yazar. tick (ideal/real/error) / done / error."""
-    try:
-        commands, _ = parse_commands(text or "", strict=False)
-    except CommandParseError:
-        commands = []
-    if optimize_cfg and optimize_cfg.enabled:
-        commands = optimize_commands(commands, start_pt, optimize_cfg)
+    """Simülasyonu queue'ya event olarak yazar. ``commands`` canonical hazırlık çıktısıdır."""
     mult = max(0.1, min(5.0, float(speed_multiplier)))
     executor = CommandExecutor(commands)
     ideal_pos = (float(start_pt[0]), float(start_pt[1]))
@@ -847,19 +1257,62 @@ async def _run_sim_to_queue(
                 "target": state["target"],
                 "finished": state["finished"],
             }
-            await queue.put(("tick", payload))
+            await _safe_enqueue_event(queue, "tick", payload)
             ideal_pos = new_ideal_pos
             t += dt
             steps += 1
             if state["finished"]:
-                await queue.put(("done", {"t": round(t, 6), "x": real_pos[0], "y": real_pos[1], "ideal_x": ideal_pos[0], "ideal_y": ideal_pos[1], "real_x": real_pos[0], "real_y": real_pos[1], "error": round(error, 6), "error_mean": round(error_mean, 6), "error_max": round(error_max, 6)}))
+                done_payload: dict = {
+                    "t": round(t, 6),
+                    "x": real_pos[0],
+                    "y": real_pos[1],
+                    "ideal_x": ideal_pos[0],
+                    "ideal_y": ideal_pos[1],
+                    "real_x": real_pos[0],
+                    "real_y": real_pos[1],
+                    "error": round(error, 6),
+                    "error_mean": round(error_mean, 6),
+                    "error_max": round(error_max, 6),
+                }
+                if (
+                    file_artifact_opt
+                    and file_artifact_opt.enabled
+                    and job_id
+                    and commands
+                ):
+                    loop = asyncio.get_running_loop()
+                    root = _job_file_artifact_root()
+                    try:
+                        writer = functools.partial(
+                            _write_job_file_artifact_sync,
+                            list(commands),
+                            (float(start_pt[0]), float(start_pt[1])),
+                            job_id,
+                            file_artifact_opt.mode,
+                            root,
+                        )
+                        file_meta = await loop.run_in_executor(None, writer)
+                        done_payload["file_artifact"] = file_meta
+                    except Exception as ex:
+                        done_payload["file_artifact"] = {
+                            "path": None,
+                            "mode": file_artifact_opt.mode,
+                            "last_write_succeeded": False,
+                            "last_error": str(ex),
+                            "last_command_count": len(commands),
+                        }
+                await _safe_enqueue_event(queue, "done", done_payload)
                 return
             await asyncio.sleep(dt)
-        await queue.put(("error", {"message": "max_steps exceeded", "t": round(t, 6), "x": real_pos[0], "y": real_pos[1]}))
+        await _safe_enqueue_event(
+            queue,
+            "error",
+            {"message": "max_steps exceeded", "t": round(t, 6), "x": real_pos[0], "y": real_pos[1]},
+        )
     except asyncio.CancelledError:
         pass
     finally:
-        await queue.put((None, None))
+        await _safe_enqueue_event(queue, None, None)
 
 
 async def _stream_from_queue(job_id: str):
@@ -869,35 +1322,45 @@ async def _stream_from_queue(job_id: str):
         yield f"event: error\ndata: {json.dumps({'message': 'job not found'})}\n\n"
         return
     queue = job["queue"]
-    while True:
-        try:
-            event_type, data = await asyncio.wait_for(queue.get(), timeout=30.0)
-        except asyncio.TimeoutError:
-            yield "event: ping\ndata: {}\n\n"
-            continue
-        if event_type is None:
-            break
-        if data is not None:
-            yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
-        if event_type in ("done", "error"):
-            break
+    try:
+        while True:
+            try:
+                event_type, data = await asyncio.wait_for(queue.get(), timeout=30.0)
+            except asyncio.TimeoutError:
+                yield "event: ping\ndata: {}\n\n"
+                continue
+            if event_type is None:
+                break
+            if data is not None:
+                yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+            if event_type in ("done", "error"):
+                break
+    finally:
+        # Stream kapanırsa job'u deterministik temizle.
+        latest = jobs.get(job_id)
+        if latest:
+            task = latest.get("task")
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            jobs.pop(job_id, None)
 
 
 @app.post("/api/jobs")
 async def create_job(req: SimulateRequest):
     """Job oluşturur. Blocked ise 409. Yoksa { job_id } döner."""
+    _sweep_jobs_ttl(time.time())
     text = (req.text or "").strip()
     dt = max(0.001, min(0.1, float(req.dt)))
     speed_multiplier = max(0.1, min(5.0, float(req.speed_multiplier)))
-    start = req.start
-    try:
-        commands, parser_diags = parse_commands(text, strict=False)
-    except CommandParseError as e:
-        commands = []
-        parser_diags = [e.diagnostic]
-    start_pt = start if start is not None else _find_start_from_commands(commands)
-    if start_pt is None:
-        start_pt = (0.0, 0.0)
+    optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
+    prep = prepare_job_commands(text, explicit_start=req.start, optimize_cfg=optimize_cfg)
+    commands = prep.commands
+    parser_diags = prep.parser_diags
+    start_pt = prep.start_pt
     limits = _limits_from_text(text)
     stats_out = StatsOut()
     analysis_diags: List[Diagnostic] = []
@@ -910,6 +1373,7 @@ async def create_job(req: SimulateRequest):
             limits=limits,
             walls=walls,
             collision_mode=collision_mode,
+            optimize_cfg=None,
         )
         stats_out = StatsOut(
             bounds=st.bounds,
@@ -917,6 +1381,14 @@ async def create_job(req: SimulateRequest):
             wait_total=st.wait_total,
             path_length=st.path_length,
             estimated_time=st.estimated_time,
+            path_points=st.path_points,
+            original_move_count=prep.original_move_count
+            if prep.original_move_count is not None
+            else st.original_move_count,
+            optimized_move_count=prep.optimized_move_count
+            if prep.optimized_move_count is not None
+            else st.optimized_move_count,
+            reduction_ratio=prep.reduction_ratio if prep.reduction_ratio is not None else st.reduction_ratio,
             collision_count=st.collision_count,
             collisions_sample=[
                 CollisionOut(
@@ -945,28 +1417,22 @@ async def create_job(req: SimulateRequest):
                 "stats": stats_out.model_dump(),
             },
         )
-    optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
     motion_cfg = _motion_cfg_from_request(getattr(req, "motion", None))
     job_id = str(uuid.uuid4())
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=max(16, JOB_QUEUE_MAXSIZE))
     task = asyncio.create_task(
         _run_sim_to_queue(
-            text, dt, speed_multiplier,
+            list(commands),
+            dt,
+            speed_multiplier,
             (float(start_pt[0]), float(start_pt[1])),
             queue,
-            optimize_cfg=optimize_cfg,
             motion_cfg=motion_cfg,
+            job_id=job_id,
+            file_artifact_opt=req.file_artifact,
         )
     )
     jobs[job_id] = {"task": task, "queue": queue}
-
-    async def cleanup():
-        try:
-            task.cancel()
-            await task
-        except asyncio.CancelledError:
-            pass
-        jobs.pop(job_id, None)
 
     task.add_done_callback(lambda _: jobs.pop(job_id, None))
     return {"job_id": job_id}
@@ -1003,29 +1469,33 @@ async def simulate(req: SimulateRequest):
     text = (req.text or "").strip()
     dt = max(0.001, min(0.1, float(req.dt)))
     speed_multiplier = max(0.1, min(5.0, float(req.speed_multiplier)))
-    start = req.start
-
-    try:
-        commands, parser_diags = parse_commands(text, strict=False)
-    except CommandParseError as e:
-        commands = []
-        parser_diags = [e.diagnostic]
-
-    start_pt = start if start is not None else _find_start_from_commands(commands)
-    if start_pt is None:
-        start_pt = (0.0, 0.0)
+    optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
+    prep = prepare_job_commands(text, explicit_start=req.start, optimize_cfg=optimize_cfg)
+    commands = prep.commands
+    parser_diags = prep.parser_diags
+    start_pt = prep.start_pt
 
     limits = _limits_from_text(text)
     stats_out = StatsOut()
     analysis_diags: List[Diagnostic] = []
     if commands:
-        st, analysis_diags = analyze_commands(commands, start=start_pt, limits=limits)
+        st, analysis_diags = analyze_commands(
+            commands, start=start_pt, limits=limits, optimize_cfg=None
+        )
         stats_out = StatsOut(
             bounds=st.bounds,
             move_count=st.move_count,
             wait_total=st.wait_total,
             path_length=st.path_length,
             estimated_time=st.estimated_time,
+            path_points=st.path_points,
+            original_move_count=prep.original_move_count
+            if prep.original_move_count is not None
+            else st.original_move_count,
+            optimized_move_count=prep.optimized_move_count
+            if prep.optimized_move_count is not None
+            else st.optimized_move_count,
+            reduction_ratio=prep.reduction_ratio if prep.reduction_ratio is not None else st.reduction_ratio,
         )
 
     parser_errors = sum(1 for d in parser_diags if d.severity == "ERROR")
@@ -1041,13 +1511,13 @@ async def simulate(req: SimulateRequest):
             },
         )
 
-    optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
     motion_cfg = _motion_cfg_from_request(getattr(req, "motion", None))
     return StreamingResponse(
         _simulate_event_stream(
-            text, dt, speed_multiplier,
+            list(commands),
+            dt,
+            speed_multiplier,
             (float(start_pt[0]), float(start_pt[1])),
-            optimize_cfg=optimize_cfg,
             motion_cfg=motion_cfg,
         ),
         media_type="text/event-stream",
@@ -1108,32 +1578,36 @@ def compile_plan(req: CompilePlanRequest):
         for w in plan.walls
     ]
 
-    commands = compile_path_to_commands(world_path, speed=speed)
-    commands_text_raw = serialize_commands(commands)
-    commands_text_optimized = commands_text_raw
-
+    # Kaynak gerçeği: derleyici çıktısı; isteğe bağlı tek optimize sonrası ``working``.
+    commands_raw = compile_path_to_commands(world_path, speed=speed)
+    commands_text_raw = serialize_commands(commands_raw)
+    start_pt = (0.0, 0.0)
     optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
-    if optimize_cfg and optimize_cfg.enabled:
-        start_pt = (0.0, 0.0)
-        commands_opt = optimize_commands(commands, start_pt, optimize_cfg)
-        commands_text_optimized = serialize_commands(commands_opt)
+    working, omc, optmc, rr = apply_optional_optimize_to_commands(
+        commands_raw,
+        start_pt=start_pt,
+        optimize_cfg=optimize_cfg,
+    )
+    if optimize_cfg is not None and getattr(optimize_cfg, "enabled", False):
+        commands_text_optimized = serialize_commands(working)
+    else:
+        commands_text_optimized = commands_text_raw
 
+    # ``commands_text_raw`` üzerinden parse yalnızca serileştirme doğrulaması içindir.
     parser_diags: List[Diagnostic] = []
     try:
-        commands_parsed, parser_diags = parse_commands(commands_text_raw, strict=False)
+        _, parser_diags = parse_commands(commands_text_raw, strict=False)
     except CommandParseError as e:
-        commands_parsed = []
         parser_diags = [e.diagnostic]
 
-    start_pt = (0.0, 0.0)
     stats_out = StatsOut()
     analysis_diags: List[Diagnostic] = []
-    if commands_parsed:
+    if working:
         st, analysis_diags = analyze_commands(
-            commands_parsed,
+            working,
             start=start_pt,
             limits=None,
-            optimize_cfg=optimize_cfg,
+            optimize_cfg=None,
             walls=walls_world,
             collision_mode="warn",
         )
@@ -1144,9 +1618,9 @@ def compile_plan(req: CompilePlanRequest):
             path_length=st.path_length,
             estimated_time=st.estimated_time,
             path_points=st.path_points,
-            original_move_count=st.original_move_count,
-            optimized_move_count=st.optimized_move_count,
-            reduction_ratio=st.reduction_ratio,
+            original_move_count=omc if omc is not None else st.original_move_count,
+            optimized_move_count=optmc if optmc is not None else st.optimized_move_count,
+            reduction_ratio=rr if rr is not None else st.reduction_ratio,
             collision_count=st.collision_count,
             collisions_sample=[
                 CollisionOut(
@@ -1186,18 +1660,13 @@ def export_robot(req: ExportRequest) -> ExportResponse:
     Blocked olsa bile content üretilir; ok=false ve header'da BLOCKED: true.
     """
     text = (req.text or "").strip()
-    try:
-        commands, parser_diags = parse_commands(text, strict=False)
-    except CommandParseError as e:
-        commands = []
-        parser_diags = [e.diagnostic]
-
-    start_pt = req.start if req.start is not None else _find_start_from_commands(commands)
-    if start_pt is None:
-        start_pt = (0.0, 0.0)
+    optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
+    prep = prepare_job_commands(text, explicit_start=req.start, optimize_cfg=optimize_cfg)
+    commands = prep.commands
+    parser_diags = prep.parser_diags
+    start_pt = prep.start_pt
 
     limits = _limits_from_text(text)
-    optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
     fmt = getattr(req, "format", "robot_v1")
     if fmt not in ("robot_v1", "gcode_lite"):
         fmt = "robot_v1"
@@ -1207,7 +1676,7 @@ def export_robot(req: ExportRequest) -> ExportResponse:
         start_pt,
         limits=limits,
         format=fmt,
-        optimize_cfg=optimize_cfg,
+        optimize_cfg=None,
     )
     filename = "robot_export.robot_v1.txt" if fmt == "robot_v1" else "robot_export.gcode"
     stats_out = StatsOut(
@@ -1217,9 +1686,13 @@ def export_robot(req: ExportRequest) -> ExportResponse:
         path_length=stats.path_length,
         estimated_time=stats.estimated_time,
         path_points=stats.path_points,
-        original_move_count=stats.original_move_count,
-        optimized_move_count=stats.optimized_move_count,
-        reduction_ratio=stats.reduction_ratio,
+        original_move_count=prep.original_move_count
+        if prep.original_move_count is not None
+        else stats.original_move_count,
+        optimized_move_count=prep.optimized_move_count
+        if prep.optimized_move_count is not None
+        else stats.optimized_move_count,
+        reduction_ratio=prep.reduction_ratio if prep.reduction_ratio is not None else stats.reduction_ratio,
         collision_count=stats.collision_count,
         collisions_sample=[
             CollisionOut(
@@ -1245,3 +1718,133 @@ def export_robot(req: ExportRequest) -> ExportResponse:
         analysis_diags=[_diag_to_out(d) for d in analysis_diags],
         stats=stats_out,
     )
+
+
+@app.post(
+    "/api/execute_serial",
+    response_model=ExecuteSerialResponse,
+    responses={
+        400: {"model": ExecuteSerialResponse},
+        403: {"model": ExecuteSerialResponse},
+        409: {"model": ExecuteSerialResponse},
+    },
+)
+def execute_serial(req: ExecuteSerialRequest, request: Request):
+    """
+    **Donanım etkisi:** DSL derlenir; ``dry_run=false`` iken UART üzerinden batch gönderim yapılabilir.
+
+    Canonical DSL → ``prepare_job_commands`` → ``run_command_execution_job``.
+
+    **Erişim:** Varsayılan yalnızca loopback (127.0.0.1, ::1, localhost; testte ``testclient``).
+    ``EXECUTE_SERIAL_ALLOW_REMOTE=true`` ile IP kısıtı kaldırılır (ters proxy / uzman senaryosu).
+    ``EXECUTE_SERIAL_ADMIN_TOKEN`` tanımlıysa ``X-Execute-Token`` başlığı zorunludur.
+
+    - ``dry_run`` varsayılan True: UART açılmaz, artifact + özet.
+    - ``dry_run=False``: ``SERIAL_PORT`` (zorunlu) ve ``SERIAL_BAUD`` (varsayılan 115200) yalnızca env;
+      geçersiz baud → 400 ``INVALID_SERIAL_BAUD``; eşzamanlı canlı gönderim → 409 ``SERIAL_EXECUTION_BUSY``.
+    """
+    guard = _execute_serial_access_guard(request)
+    if guard is not None:
+        return guard
+
+    optimize_cfg = _optimize_cfg_from_request(req.optimize)
+    prep = prepare_job_commands((req.text or "").strip(), explicit_start=req.start, optimize_cfg=optimize_cfg)
+
+    parser_errors = [d for d in prep.parser_diags if d.severity == "ERROR"]
+    if parser_errors:
+        body = ExecuteSerialResponse(
+            status="failed",
+            message="DSL parse hatası; gönderim yapılmadı.",
+            command_count=len(prep.commands),
+            error_detail=parser_errors[0].message,
+            notes=[d.message for d in parser_errors[:8]],
+        )
+        return JSONResponse(status_code=400, content=body.model_dump())
+
+    if not prep.commands:
+        return ExecuteSerialResponse(status="skipped", message="Komut listesi boş.", command_count=0)
+
+    opts = ExecutionJobOptions(
+        dry_run=req.dry_run,
+        start_xy=(float(prep.start_pt[0]), float(prep.start_pt[1])),
+        artifact_dir=_execute_serial_artifact_dir(),
+        artifact_basename=f"execute_serial_{uuid.uuid4().hex[:12]}",
+    )
+    ctx = ExecutionContext()
+
+    if req.dry_run:
+        result = run_command_execution_job(prep.commands, driver=None, options=opts, context=ctx)
+        return _execution_result_to_serial_response(result)
+
+    live_ok, live_msg = _serial_live_env_ok()
+    if not live_ok:
+        body = ExecuteSerialResponse(
+            status="failed",
+            message=live_msg,
+            command_count=len(prep.commands),
+            error_detail="SERIAL_PORT_MISSING",
+        )
+        return JSONResponse(status_code=400, content=body.model_dump())
+
+    baud, baud_err = _parse_serial_baud_from_env()
+    if baud is None:
+        body = ExecuteSerialResponse(
+            status="failed",
+            message=baud_err or "SERIAL_BAUD geçersiz.",
+            command_count=len(prep.commands),
+            error_detail="INVALID_SERIAL_BAUD",
+        )
+        return JSONResponse(status_code=400, content=body.model_dump())
+
+    if not _execute_serial_live_lock.acquire(blocking=False):
+        body = ExecuteSerialResponse(
+            status="failed",
+            message="Başka bir seri gönderim sürüyor; bitince tekrar deneyin.",
+            command_count=len(prep.commands),
+            error_detail="SERIAL_EXECUTION_BUSY",
+        )
+        return JSONResponse(status_code=409, content=body.model_dump())
+
+    try:
+        driver = _build_serial_driver_for_execute(baudrate=baud)
+        result = run_command_execution_job(prep.commands, driver=driver, options=opts, context=ctx)
+        return _execution_result_to_serial_response(result)
+    finally:
+        _execute_serial_live_lock.release()
+
+
+@app.post("/api/alignment/rigid_2d")
+def alignment_rigid_2d(req: AlignRigid2dRequest) -> JSONResponse:
+    """
+    Prepare/Plan anlığındaki duvar segmentleri + kontrol noktaları ile rijit 2D hizalama.
+    Ön/son SVG ve alignment raporu döner (mevcut aligner hattı).
+    """
+    try:
+        layout = walls_list_to_printable_layout(list(req.walls or []))
+        cps = [
+            ControlPoint(
+                cad_x=float(p.cad_x),
+                cad_y=float(p.cad_y),
+                site_x=float(p.site_x),
+                site_y=float(p.site_y),
+                label=p.label,
+                weight=float(p.weight) if p.weight is not None else None,
+            )
+            for p in req.control_points
+        ]
+        aligned, report = align_printable_layout_rigid_2d(
+            layout, cps, tolerance_m=float(req.tolerance_m)
+        )
+        pre_svg = render_pre_alignment_svg(layout)
+        post_svg = render_post_alignment_svg(aligned)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "alignment": alignment_report_to_jsonable(report),
+                "pre_svg": pre_svg,
+                "post_svg": post_svg,
+            },
+        )
+    except Exception as ex:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(ex)})

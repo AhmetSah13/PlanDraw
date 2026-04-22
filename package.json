@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "concurrently -n BACKEND,FRONTEND -c green,blue \"npm:dev:backend\" \"npm:dev:frontend\"",
     "dev:backend": "cd backend && python -m uvicorn app.api.main:app --reload --port 8000",
-    "dev:frontend": "cd webapp/frontend && npm run dev -- --host 127.0.0.1 --port 5173"
+    "dev:frontend": "cd webapp/operator-v2 && npm run dev -- --host 127.0.0.1 --port 5173"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

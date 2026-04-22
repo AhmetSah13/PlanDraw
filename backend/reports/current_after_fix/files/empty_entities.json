@@ -1,0 +1,59 @@
+{
+  "file": "benchmarks\\B_realistic\\empty_entities.dxf",
+  "result": "WARN",
+  "failure_reason": "Metrikler eşiği aştı (çok hareket veya çakışma)",
+  "recommended_actions": [
+    "Step size veya katman seçimini iyileştirin."
+  ],
+  "dxf_units_detected": "m",
+  "bbox": [
+    0.0,
+    0.0,
+    40000.0,
+    25000.0
+  ],
+  "bbox_size": [
+    40000.0,
+    25000.0
+  ],
+  "total_length_m": 449000.0,
+  "selected_layers": [
+    "WALLS"
+  ],
+  "recommended_step_size_raw": 0.5,
+  "final_step_size_used": 0.5,
+  "move_count": 570006,
+  "collision_count": 0,
+  "pen_up_travel_distance": 79820.919527,
+  "analyze_result": "SAFE",
+  "retry_attempts": [],
+  "strategy_succeeded": null,
+  "runtime_ms": {
+    "preview": 0.41,
+    "import": 0.28,
+    "path": 61.15,
+    "analyze": 284.12,
+    "export": 567.84
+  },
+  "export_roundtrip_ok": true,
+  "dwg_convert_runtime_ms": null,
+  "dxf_size_bytes": null,
+  "error": null,
+  "fail_reason_code": null,
+  "suite": "B",
+  "original_total_segments": 18,
+  "original_total_length_m": 449000.0,
+  "post_budget_total_segments": 9,
+  "post_budget_total_length_m": 285000.0,
+  "plan_length_m": 285000.0,
+  "drawn_length_m": 352320.91952673165,
+  "travel_length_m": 0.0,
+  "path_length_m": 352320.91952673165,
+  "path_overhead": 1.0,
+  "shape_retention_plan": 0.634744,
+  "shape_retention_drawn": 0.784679,
+  "segment_budget_applied": false,
+  "warnings": [
+    "Recentering applied (mode=center, dx=-20000.0, dy=-12500.0)."
+  ]
+}

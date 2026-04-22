@@ -145,10 +145,15 @@ class PathGenerator:
         return points
 
     def generate_path(self) -> List[Tuple[float, float]]:
+        """Düz nokta listesi (geriye uyumluluk)."""
+        segments = self.generate_path_segments()
+        return [p for seg in segments for p in seg]
+
+    def generate_path_segments(self) -> List[List[Tuple[float, float]]]:
         """
-        Plandaki tüm duvarlar için nokta listesi üretir ve
-        tek bir sıralı liste şeklinde birleştirir.
-        order_walls=True ise önce en-yakın-komşu sıralama uygulanır (orijinal plan değişmez).
+        Duvarlar için segment bazlı nokta listeleri.
+        Her segment = bir duvar (PEN DOWN çizim); segmentler arası pen-up travel.
+        order_walls=True ise en-yakın-komşu sıralama uygulanır.
         """
         walls_to_use: List[Wall]
         if self.order_walls:
@@ -161,12 +166,16 @@ class PathGenerator:
         else:
             walls_to_use = list(self.plan)
 
-        tum_noktalar: List[Tuple[float, float]] = []
+        result: List[List[Tuple[float, float]]] = []
         for wall in walls_to_use:
-            duvar_noktalari = self._generate_points_for_wall(wall)
-            tum_noktalar.extend(duvar_noktalari)
+            pts = self._generate_points_for_wall(wall)
+            if pts:
+                result.append(pts)
+        return result
 
-        return tum_noktalar
+    def generate_path_flat(self) -> List[Tuple[float, float]]:
+        """Eski ad: generate_path() ile aynı (düz liste)."""
+        return self.generate_path()
 
 
 if __name__ == "__main__":

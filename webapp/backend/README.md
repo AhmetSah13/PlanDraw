@@ -1,4 +1,15 @@
-# PlanDraw Backend
+# PlanDraw Backend (LEGACY / DEPRECATED)
+
+## Önemli
+
+Bu klasör (`webapp/backend/`) **legacy/deprecated** kabul edilmelidir. Projenin **tek gerçek backend** kaynağı `backend/` klasörüdür.
+
+- **Source of truth**: `backend/`
+- **Legacy**: `webapp/backend/` (sadece geriye dönük referans; aktif geliştirme yok)
+
+Yanlışlıkla legacy backend’i çalıştırmamak için:
+- Geliştirme ve demo için repoda **kök dizinden** `npm run dev` kullanın, veya doğrudan `backend/` altındaki `app.api.main:app` uygulamasını çalıştırın.
+- Bu klasördeki `run.bat` artık legacy uygulamayı çalıştırmaz; sizi doğru backend’e yönlendirir.
 
 ## PowerShell'de "running scripts is disabled" hatası
 

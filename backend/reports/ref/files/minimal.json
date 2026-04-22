@@ -1,0 +1,274 @@
+{
+  "file": "benchmarks\\A_expected_pass\\minimal.dxf",
+  "result": "PASS",
+  "failure_reason": null,
+  "recommended_actions": [],
+  "dxf_units_detected": "mm",
+  "bbox": [
+    -0.8,
+    -0.4,
+    10.8,
+    6.4
+  ],
+  "bbox_size": [
+    11.600000000000001,
+    6.800000000000001
+  ],
+  "total_length_m": 73.6,
+  "selected_layers": [
+    "WALLS"
+  ],
+  "recommended_step_size_raw": 0.092,
+  "final_step_size_used": 0.092,
+  "move_count": 581,
+  "collision_count": 0,
+  "pen_up_travel_distance": 18.080212,
+  "analyze_result": "SAFE",
+  "retry_attempts": [],
+  "strategy_succeeded": null,
+  "runtime_ms": {
+    "preview": 0.17,
+    "import": 0.23,
+    "path": 0.11,
+    "analyze": 0.29,
+    "export": 0.7
+  },
+  "export_roundtrip_ok": true,
+  "dwg_convert_runtime_ms": null,
+  "dxf_size_bytes": null,
+  "error": null,
+  "fail_reason_code": null,
+  "suite": "A",
+  "original_total_segments": 15,
+  "original_total_length_m": 73.6,
+  "post_budget_total_segments": 13,
+  "post_budget_total_length_m": 50.4,
+  "plan_length_m": 50.4,
+  "drawn_length_m": 50.4,
+  "travel_length_m": 18.080211634287,
+  "path_length_m": 68.480211634287,
+  "path_overhead": 1.358734,
+  "shape_retention_plan": 0.684783,
+  "shape_retention_drawn": 0.684783,
+  "original_walls_candidate_length_m": 50.4,
+  "original_drawable_length_m": 73.6,
+  "retention_vs_all": 0.684783,
+  "retention_vs_walls_candidate": 1.0,
+  "retention_vs_drawable": 0.684783,
+  "segment_budget_applied": false,
+  "units_retry_used": false,
+  "units_retry_reason": null,
+  "units_candidates": null,
+  "units_chosen": null,
+  "units_retry_metrics": null,
+  "dxf_diagnostics": {
+    "entity_counts": {
+      "LINE": 15,
+      "LWPOLYLINE": 0,
+      "POLYLINE": 0,
+      "ARC": 0,
+      "CIRCLE": 0,
+      "SPLINE": 0,
+      "INSERT": 0,
+      "HATCH": 0,
+      "TEXT": 0,
+      "DIMENSION": 0
+    },
+    "layers": [
+      {
+        "name": "WALLS",
+        "entity_count": 13,
+        "total_length": 50.4,
+        "entity_types": []
+      },
+      {
+        "name": "DIM",
+        "entity_count": 2,
+        "total_length": 23.200000000000003,
+        "entity_types": []
+      }
+    ],
+    "complexity": {
+      "total_entities": 15,
+      "total_layers": 2,
+      "total_segments_after_flatten": 0,
+      "spline_count": 0,
+      "hatch_count": 0,
+      "insert_count": 0
+    },
+    "bbox": {
+      "bbox_size_world": [
+        11.600000000000001,
+        6.800000000000001
+      ],
+      "bbox_size_raw": null
+    },
+    "units": {
+      "units_detected": "mm"
+    },
+    "diagnostics_flags": []
+  },
+  "layer_intelligence": {
+    "candidate_layers": [
+      "WALLS",
+      "DIM"
+    ],
+    "selected_layers": [
+      "WALLS"
+    ],
+    "scores": {
+      "WALLS": 8.9396,
+      "DIM": 0.1864
+    }
+  },
+  "graph_metrics": {
+    "node_count": 22,
+    "edge_count": 13,
+    "connected_components_count": 10,
+    "connected_component_sizes": [
+      4,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "degree_histogram": {
+      "0": 0,
+      "1": 18,
+      "2": 4,
+      "3+": 0
+    },
+    "intersection_count": 0,
+    "dangling_edges_count": 9,
+    "closed_cycles_count": 1,
+    "cycle_perimeters": [
+      20.0,
+      32.0,
+      12.0,
+      20.0,
+      12.0
+    ],
+    "dominant_angles": {
+      "0": 7,
+      "90": 6,
+      "45": 0,
+      "135": 0,
+      "other": 0
+    },
+    "edge_length_stats": {
+      "min": 0.9000000000000004,
+      "median": 2.6,
+      "p95": 10.0
+    },
+    "wall_likeliness_score": 0.6446
+  },
+  "room_candidates_count": 1,
+  "wall_candidates_count": 10,
+  "move_count_before_optimize": 581,
+  "move_count_after_optimize": 45,
+  "travel_length_before_optimize": 18.080211634287,
+  "travel_length_after_optimize": 31.582564043895,
+  "path_overhead_before_optimize": 1.358734,
+  "path_overhead_after_optimize": 1.578875,
+  "travel_reduction_pct": -74.68,
+  "commands_baseline_metrics": {
+    "drawn_length_m": 50.4,
+    "travel_length_m": 18.080211634287,
+    "path_length_m": 68.480211634287,
+    "path_overhead": 1.358734,
+    "has_pen_down": true
+  },
+  "commands_optimized_metrics": {
+    "drawn_length_m": 54.558559159471,
+    "travel_length_m": 31.582564043895,
+    "path_length_m": 86.141123203366,
+    "path_overhead": 1.578875,
+    "has_pen_down": true
+  },
+  "optimizer_decision": {
+    "used": false,
+    "reason": "TRAVEL_WORSE_FALLBACK"
+  },
+  "warnings": [
+    "Recentering applied (mode=center, dx=-5.0, dy=-3.0)."
+  ],
+  "room_candidates": [
+    {
+      "perimeter": 32.0,
+      "bbox": [
+        -5.0,
+        -3.0,
+        5.0,
+        3.0
+      ],
+      "vertex_count": 4
+    }
+  ],
+  "wall_candidates": [
+    {
+      "length_sum": 32.0,
+      "bbox": [
+        -5.0,
+        -3.0,
+        5.0,
+        3.0
+      ],
+      "segment_count": 4,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 1.0
+    },
+    {
+      "length_sum": 3.6,
+      "bbox": [
+        1.5,
+        -0.6,
+        1.5,
+        3.0
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    },
+    {
+      "length_sum": 3.0,
+      "bbox": [
+        -1.5,
+        -1.7999999999999998,
+        1.5,
+        -1.7999999999999998
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    },
+    {
+      "length_sum": 2.6,
+      "bbox": [
+        -1.5,
+        0.39999999999999997,
+        -1.5,
+        3.0
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    },
+    {
+      "length_sum": 2.5,
+      "bbox": [
+        -1.5,
+        -3.0,
+        -1.5,
+        -0.5
+      ],
+      "segment_count": 1,
+      "axis_alignment_score": 1.0,
+      "connectivity_score": 0.5
+    }
+  ]
+}
