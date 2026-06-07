@@ -1,7 +1,8 @@
 {
-  "name": "plandraw-operator-v3",
+  "name": "layoutbot-operator-v3",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
+  "description": "LayoutBot Command Center — deneysel operatör arayüzü",
   "type": "module",
   "scripts": {
     "dev": "vite",

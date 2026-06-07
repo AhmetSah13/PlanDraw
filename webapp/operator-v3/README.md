@@ -1,32 +1,22 @@
-# NewBot Command Center (Operator V3)
+# LayoutBot Command Center (Operator V3)
 
-Deneysel **Robot Command Center** arayüzü. Resmi aktif UI değildir (`operator-v2` korunur).
+LayoutBot projesinin deneysel **Robot Command Center** arayüzü. Resmi aktif UI değildir (`operator-v2` korunur).
 
 ## Çalıştırma
 
 ```powershell
-# Backend (ayrı terminal)
-cd backend
-python -m uvicorn app.api.main:app --reload --port 8000
+# Backend + V3 (önerilen)
+npm run dev:v3
 
-# V3 Command Center
-cd webapp/operator-v3
-npm install
-npm run dev
+# Yalnızca V3
+npm run dev:frontend:v3
 ```
 
-http://127.0.0.1:5174
+- Frontend: http://127.0.0.1:5174
+- Backend: http://127.0.0.1:8000
 
-Repo kökünden: `npm run dev:v3` veya `npm run dev:frontend:v3`
+## API (Vite proxy)
 
-## Tasarım
+`/health`, `/api/*` → `127.0.0.1:8000`
 
-- Karanlık mission-control teması
-- CAD → Robot pipeline stepper
-- Canvas plan önizleme
-- Terminal komut akışı
-- Telemetri + canlı STOP
-
-## API
-
-Vite proxy: `/api`, `/health` → `127.0.0.1:8000`
+Kullanılan endpoint'ler: `GET /health`, `GET /api/status`, `POST /api/import_dxf`, `POST /api/import_plan`, `POST /api/compile_plan`, `POST /api/analyze`, `POST /api/execute_serial`, `POST /api/execute_serial/stop`, `POST /api/jobs`, `POST /api/jobs/{id}/stop`.

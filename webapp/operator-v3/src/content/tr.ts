@@ -1,7 +1,8 @@
 export const tr = {
   brand: {
-    name: "NewBot",
+    name: "LayoutBot",
     commandCenter: "Command Center",
+    operatorPanel: "LayoutBot Operatör Paneli",
     tagline: "İnşaat Planı Çizen Otonom Mobil Robot",
     hero: "CAD'den Robota Çizim Hattı",
     subtitle:
@@ -101,6 +102,12 @@ export const tr = {
   safety: {
     banner:
       "Güvenlik Katmanı: Canlı çalıştırma yalnızca hazır ortamda ve operatör gözetiminde yapılmalıdır.",
+  },
+  errors: {
+    backendOffline: "Backend bağlantısı yok — npm run dev:v3 ile sunucuyu başlatın.",
+    unsupportedFile: "Desteklenmeyen dosya. DXF veya JSON plan seçin.",
+    importFailed: "Plan içe aktarılamadı.",
+    noCommands: "Derleme sonucu komut üretmedi.",
   },
 } as const;
 

@@ -74,7 +74,7 @@ export function MissionRail({ active, onNavigate }: MissionRailProps) {
       </nav>
 
       <div className="border-t border-white/5 p-4">
-        <p className="text-[10px] text-slate-600">v0.2 · Deneme arayüzü</p>
+        <p className="text-[10px] text-slate-600">{tr.brand.operatorPanel}</p>
       </div>
     </aside>
   );

@@ -7,15 +7,19 @@ import { RobotControlDeck } from "./components/RobotControlDeck";
 import { SafetyNotice } from "./components/SafetyNotice";
 import { TelemetryPanel } from "./components/TelemetryPanel";
 import type { ActiveMode, MissionSection, StepStatus } from "./content/tr";
+import { tr } from "./content/tr";
 import {
   analyzeCommands,
   countStrokes,
   createSimulationJob,
   executeSerial,
+  extractCommandsText,
   fetchHealth,
+  formatUserError,
   importDxf,
   importPlanJson,
   isPenSafeCommands,
+  isSupportedPlanFile,
   stopLiveSerial,
   stopSimulationJob,
 } from "./services/api";
@@ -102,8 +106,25 @@ export default function App() {
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
+  function handleFileSelect(file: File) {
+    if (!isSupportedPlanFile(file)) {
+      pushLog(tr.errors.unsupportedFile);
+      return;
+    }
+    setSelectedFile(file);
+  }
+
   async function handleCompile() {
     if (!selectedFile) return;
+    if (!backendOnline) {
+      pushLog(tr.errors.backendOffline);
+      return;
+    }
+    if (!isSupportedPlanFile(selectedFile)) {
+      pushLog(tr.errors.unsupportedFile);
+      return;
+    }
+
     setBusy(true);
     setStep("upload", "ready");
     pushLog(`Plan yükleniyor: ${selectedFile.name}`);
@@ -113,36 +134,32 @@ export default function App() {
       const res =
         ext === "json" ? await importPlanJson(selectedFile) : await importDxf(selectedFile);
 
-      if (!res.ok) throw new Error(res.error ?? "Plan içe aktarılamadı");
+      if (!res.ok) throw new Error(res.error ?? tr.errors.importFailed);
 
       setStep("upload", "success");
       setStep("analyze", "ready");
 
-      const cmds =
-        res.commands_text_optimized ?? res.commands_text_raw ?? res.commands_text ?? "";
+      const cmds = extractCommandsText(res);
+      if (!cmds.trim()) throw new Error(tr.errors.noCommands);
+
       setCommandsText(cmds);
       setWalls(res.walls ?? []);
       setPathPoints(res.raw_path_points ?? []);
       setPlanName(selectedFile.name);
 
-      const safe = cmds ? isPenSafeCommands(cmds) : false;
-      setPenSafeKnown(Boolean(cmds));
+      const safe = isPenSafeCommands(cmds);
+      setPenSafeKnown(true);
       setPenSafe(safe);
 
-      if (cmds) {
-        const analysis = await analyzeCommands(cmds, res.walls);
-        setPreflight(analysis);
-        setStep("analyze", "success");
-        setStep("compile", safe ? "success" : "error");
-      } else {
-        setStep("analyze", "error");
-        setStep("compile", "error");
-      }
+      const analysis = await analyzeCommands(cmds, res.walls);
+      setPreflight(analysis);
+      setStep("analyze", "success");
+      setStep("compile", safe ? "success" : "error");
 
       pushLog(safe ? "Pen-safe derleme doğrulandı" : "Derleme tamamlandı — pen-safe kontrol edin");
       navigate("derleme");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = formatUserError(e);
       setStep("upload", "error");
       pushLog(`Hata: ${msg}`);
     } finally {
@@ -168,7 +185,7 @@ export default function App() {
       pushLog(res.message);
     } catch (e) {
       setStep("send", "error");
-      pushLog(e instanceof Error ? e.message : String(e));
+      pushLog(formatUserError(e));
     } finally {
       setBusy(false);
     }
@@ -189,7 +206,7 @@ export default function App() {
       navigate("simulasyon");
     } catch (e) {
       setStep("simulate", "error");
-      pushLog(e instanceof Error ? e.message : String(e));
+      pushLog(formatUserError(e));
     } finally {
       setBusy(false);
     }
@@ -219,7 +236,7 @@ export default function App() {
       navigate("robot");
     } catch (e) {
       setStep("send", "error");
-      pushLog(e instanceof Error ? e.message : String(e));
+      pushLog(formatUserError(e));
     } finally {
       setBusy(false);
     }
@@ -233,7 +250,7 @@ export default function App() {
       setRobotLabel(res.stopped ? "Durduruldu" : res.status);
       pushLog(res.message);
     } catch (e) {
-      pushLog(e instanceof Error ? e.message : String(e));
+      pushLog(formatUserError(e));
     } finally {
       setBusy(false);
     }
@@ -248,7 +265,7 @@ export default function App() {
       setActiveMode("idle");
       pushLog("Simülasyon durduruldu");
     } catch (e) {
-      pushLog(e instanceof Error ? e.message : String(e));
+      pushLog(formatUserError(e));
     } finally {
       setBusy(false);
     }
@@ -290,7 +307,7 @@ export default function App() {
                 busy={busy}
                 simulationActive={Boolean(simJobId)}
                 selectedFileName={selectedFile?.name ?? null}
-                onFileSelect={setSelectedFile}
+                onFileSelect={handleFileSelect}
                 onCompile={handleCompile}
                 onDryRun={runDryRun}
                 onSimulate={runSimulate}

@@ -24,6 +24,23 @@ export class ApiError extends Error {
   }
 }
 
+/** Kullanıcıya gösterilecek Türkçe hata metni. */
+export function formatUserError(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof TypeError) {
+    return "Backend bağlantısı kurulamadı. Sunucunun çalıştığını kontrol edin.";
+  }
+  if (error instanceof SyntaxError) {
+    return "JSON plan dosyası okunamadı. Geçerli bir plan dosyası seçin.";
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Beklenmeyen bir hata oluştu.";
+}
+
 async function readJson(response: Response): Promise<unknown> {
   const text = await response.text();
   try {
@@ -39,11 +56,19 @@ function resolveError(data: unknown, status: number): string {
     const detail = row.detail ?? row.error ?? row.message;
     if (typeof detail === "string" && detail.trim()) return detail;
   }
-  return `HTTP ${status}`;
+  if (status === 403) return "Erişim reddedildi (execute_serial güvenlik kısıtı).";
+  if (status === 409) return "Seri port meşgul — eşzamanlı canlı gönderim yapılamıyor.";
+  if (status >= 500) return "Sunucu hatası. Backend loglarını kontrol edin.";
+  return `İstek başarısız (HTTP ${status})`;
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`);
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, init);
+  } catch {
+    throw new TypeError("network");
+  }
   const data = await readJson(response);
   if (!response.ok) {
     throw new ApiError(resolveError(data, response.status), response.status, data);
@@ -51,34 +76,88 @@ async function getJson<T>(path: string): Promise<T> {
   return data as T;
 }
 
+async function getJson<T>(path: string): Promise<T> {
+  return request<T>(path);
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  return request<T>(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = await readJson(response);
-  if (!response.ok) {
-    throw new ApiError(resolveError(data, response.status), response.status, data);
-  }
-  return data as T;
 }
 
 async function postForm<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, { method: "POST", body });
-  const data = await readJson(response);
-  if (!response.ok) {
-    throw new ApiError(resolveError(data, response.status), response.status, data);
+  return request<T>(path, { method: "POST", body });
+}
+
+function asRecord(data: unknown): Record<string, unknown> {
+  return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+}
+
+/** Import/compile yanıtından komut metnini güvenli çıkarır. */
+export function extractCommandsText(res: ImportPlanResponse | CompilePlanResponse): string {
+  const row = asRecord(res);
+  const candidates = [
+    row.commands_text_optimized,
+    row.commands_text_raw,
+    row.commands_text,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c;
   }
-  return data as T;
+  return "";
+}
+
+function normalizePathPoints(raw: unknown): number[][] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((p) => Array.isArray(p) && p.length >= 2)
+    .map((p) => [Number(p[0]), Number(p[1])])
+    .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+}
+
+function normalizeWalls(raw: unknown): number[][] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((w) => Array.isArray(w) && w.length >= 4)
+    .map((w) => w.slice(0, 4).map(Number))
+    .filter((w) => w.every(Number.isFinite));
+}
+
+export function normalizeImportResponse(data: unknown): ImportPlanResponse {
+  const row = asRecord(data);
+  return {
+    ok: row.ok === true,
+    error: typeof row.error === "string" ? row.error : row.error === null ? null : undefined,
+    warnings: Array.isArray(row.warnings) ? row.warnings.map(String) : [],
+    commands_text: typeof row.commands_text === "string" ? row.commands_text : undefined,
+    commands_text_raw: typeof row.commands_text_raw === "string" ? row.commands_text_raw : undefined,
+    commands_text_optimized:
+      typeof row.commands_text_optimized === "string" ? row.commands_text_optimized : undefined,
+    plan_text: typeof row.plan_text === "string" ? row.plan_text : undefined,
+    walls: normalizeWalls(row.walls),
+    raw_path_points: normalizePathPoints(row.raw_path_points),
+    stats: typeof row.stats === "object" && row.stats !== null ? (row.stats as ImportPlanResponse["stats"]) : undefined,
+  };
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  return getJson<HealthResponse>("/health");
+  const data = await getJson<unknown>("/health");
+  const row = asRecord(data);
+  return { ok: row.ok === true };
 }
 
 export async function fetchStatus(): Promise<StatusResponse> {
-  return getJson<StatusResponse>("/api/status");
+  const data = await getJson<unknown>("/api/status");
+  const row = asRecord(data);
+  return {
+    ok: row.ok === true,
+    dwg_converter_available: row.dwg_converter_available === true,
+    dwg_converter_reason:
+      typeof row.dwg_converter_reason === "string" ? row.dwg_converter_reason : undefined,
+  };
 }
 
 export async function importDxf(file: File): Promise<ImportPlanResponse> {
@@ -92,69 +171,130 @@ export async function importDxf(file: File): Promise<ImportPlanResponse> {
       return_raw_path: true,
     }),
   );
-  return postForm<ImportPlanResponse>("/api/import_dxf", form);
+  const data = await postForm<unknown>("/api/import_dxf", form);
+  return normalizeImportResponse(data);
 }
 
 export async function importPlanJson(file: File): Promise<ImportPlanResponse> {
-  const text = await file.text();
-  const payload = JSON.parse(text) as Record<string, unknown>;
-  return postJson<ImportPlanResponse>("/api/import_plan", {
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(await file.text()) as Record<string, unknown>;
+  } catch {
+    throw new SyntaxError("invalid json");
+  }
+  const data = await postJson<unknown>("/api/import_plan", {
     return_commands_text: true,
     return_plan_text: true,
     return_raw_path: true,
     ...payload,
   });
+  return normalizeImportResponse(data);
 }
 
 export async function compilePlan(req: CompilePlanRequest): Promise<CompilePlanResponse> {
-  return postJson<CompilePlanResponse>("/api/compile_plan", req);
+  const data = await postJson<unknown>("/api/compile_plan", req);
+  const row = asRecord(data);
+  return {
+    ok: row.ok === true,
+    error: typeof row.error === "string" ? row.error : undefined,
+    commands_text: typeof row.commands_text === "string" ? row.commands_text : undefined,
+    commands_text_raw: typeof row.commands_text_raw === "string" ? row.commands_text_raw : undefined,
+    commands_text_optimized:
+      typeof row.commands_text_optimized === "string" ? row.commands_text_optimized : undefined,
+    raw_path_points: normalizePathPoints(row.raw_path_points),
+    walls: normalizeWalls(row.walls),
+    stats: typeof row.stats === "object" && row.stats !== null ? (row.stats as CompilePlanResponse["stats"]) : undefined,
+  };
 }
 
 export async function analyzeCommands(
   commandsText: string,
   walls?: number[][],
 ): Promise<AnalyzeResponse> {
-  return postJson<AnalyzeResponse>("/api/analyze", {
+  const data = await postJson<unknown>("/api/analyze", {
     commands_text: commandsText,
     walls,
     collision_mode: "warn",
   });
+  const row = asRecord(data);
+  return {
+    blocked: row.blocked === true,
+    commands_unrolled: typeof row.commands_unrolled === "string" ? row.commands_unrolled : "",
+    stats:
+      typeof row.stats === "object" && row.stats !== null
+        ? (row.stats as AnalyzeResponse["stats"])
+        : {},
+  };
 }
 
 export async function executeSerial(
   text: string,
   options: { dryRun: boolean; walls?: number[][]; preflight?: AnalyzeResponse },
 ): Promise<ExecuteSerialResponse> {
-  return postJson<ExecuteSerialResponse>("/api/execute_serial", {
+  const data = await postJson<unknown>("/api/execute_serial", {
     text,
     dry_run: options.dryRun,
     walls: options.walls,
     preflight: options.preflight,
   });
+  return normalizeExecuteResponse(data);
 }
 
 export async function stopLiveSerial(): Promise<ExecuteSerialResponse> {
-  return postJson<ExecuteSerialResponse>("/api/execute_serial/stop", {});
+  const data = await postJson<unknown>("/api/execute_serial/stop", {});
+  return normalizeExecuteResponse(data);
+}
+
+function normalizeExecuteResponse(data: unknown): ExecuteSerialResponse {
+  const row = asRecord(data);
+  return {
+    status: typeof row.status === "string" ? row.status : "unknown",
+    message: typeof row.message === "string" ? row.message : "Yanıt mesajı yok",
+    command_count: typeof row.command_count === "number" ? row.command_count : undefined,
+    ok: row.ok === true ? true : row.ok === false ? false : undefined,
+    stopped: row.stopped === true ? true : row.stopped === false ? false : undefined,
+    mode: typeof row.mode === "string" ? row.mode : undefined,
+    error_code: typeof row.error_code === "string" ? row.error_code : null,
+    error_detail: typeof row.error_detail === "string" ? row.error_detail : null,
+    notes: Array.isArray(row.notes) ? row.notes.map(String) : undefined,
+    trace_id: typeof row.trace_id === "string" ? row.trace_id : null,
+  };
 }
 
 export async function createSimulationJob(
   text: string,
   walls?: number[][],
 ): Promise<SimulationJobResponse> {
-  return postJson<SimulationJobResponse>("/api/jobs", {
+  const data = await postJson<unknown>("/api/jobs", {
     text,
     dt: 0.016,
     speed_multiplier: 1,
     walls,
   });
+  const row = asRecord(data);
+  const jobId = row.job_id;
+  if (typeof jobId !== "string" || !jobId.trim()) {
+    throw new ApiError("Simülasyon job_id alınamadı.", 500, data);
+  }
+  return { job_id: jobId };
 }
 
 export async function stopSimulationJob(jobId: string): Promise<JobStopResponse> {
-  return postJson<JobStopResponse>(`/api/jobs/${jobId}/stop`, {});
+  const data = await postJson<unknown>(`/api/jobs/${encodeURIComponent(jobId)}/stop`, {});
+  const row = asRecord(data);
+  return {
+    stopped: row.stopped === true,
+    error: typeof row.error === "string" ? row.error : undefined,
+  };
 }
 
 export function buildSimulationStreamUrl(jobId: string): string {
-  return `${API_BASE}/api/jobs/${jobId}/stream`;
+  return `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/stream`;
+}
+
+export function isSupportedPlanFile(file: File): boolean {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ext === "dxf" || ext === "json";
 }
 
 /** Pen-safe gramer kontrolü (istemci tarafı özet). */
