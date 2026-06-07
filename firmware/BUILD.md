@@ -2,15 +2,25 @@
 
 Bu belge, `firmware/newbot_real_v1` ve `firmware/newbot_loopback_v1` sketch'lerinin **arduino-cli** ile nasıl derleneceğini açıklar.
 
-## Önemli sınırlar
+## Doğrulanmış hedef kart (ESP32-S3 DevKitC-1 N16R8)
 
-- Repoda **sabit FQBN yok**. Hedef kart modeli donanım ekibi / operatör tarafından netleştirilmeden otomatik build doğrulanmış sayılmaz.
-- Bu belge FQBN **tahmin etmez**. Komut şablonlarında `<TARGET_FQBN>` placeholder kullanılır.
+Aşağıdaki FQBN, `arduino-cli board listall esp32` ve `board details` çıktısı ile doğrulanmıştır.
+Temel board: **ESP32S3 Dev Module** (`esp32:esp32:esp32s3`); N16R8 modülü için flash/PSRAM seçenekleri eklenir.
 
-### Planlanan donanım (Patch 4A notu)
+```
+esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=default
+```
+
+| Sketch | Compile durumu (arduino-cli 1.5.1, esp32 core 3.3.8) |
+|--------|------------------------------------------------------|
+| `firmware/newbot_real_v1` | **PASS** (~304 KB flash, ~27 KB RAM) |
+| `firmware/newbot_loopback_v1` | **PASS** (~302 KB flash, ~26 KB RAM) |
+
+Farklı bir kart veya modül kullanılıyorsa FQBN yeniden doğrulanmalıdır; aşağıdaki şablonlarda `<TARGET_FQBN>` placeholder korunur.
+
+### Donanım notu (Patch 4A)
 
 - Kart: **ESP32-S3 DevKitC-1 N16R8** (`robot_config.h` → `BOARD_TARGET_NOTE`)
-- Muhtemel FQBN adayı (doğrulanmalı, varsayılan değil): `esp32:esp32:esp32s3`
 - Motor: 2× NEMA17 + 2× TMC2208 (STEP/DIR/EN)
 - Kalem: servo — pinler Patch 4B'de `robot_config.h` içine girilecek
 
@@ -53,15 +63,19 @@ arduino-cli board listall
 
 ## Compile komut şablonları
 
-Proje kökünden:
+Proje kökünden (DevKitC-1 N16R8 — doğrulanmış FQBN):
 
 ```powershell
+$Fqbn = "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=default"
+
 # Gerçek kart firmware iskeleti
-arduino-cli compile --fqbn <TARGET_FQBN> firmware/newbot_real_v1
+arduino-cli compile --fqbn $Fqbn firmware/newbot_real_v1
 
 # Loopback / protokol doğrulama sketch'i
-arduino-cli compile --fqbn <TARGET_FQBN> firmware/newbot_loopback_v1
+arduino-cli compile --fqbn $Fqbn firmware/newbot_loopback_v1
 ```
+
+Başka kart için `<TARGET_FQBN>` ile aynı komut yapısı kullanılır.
 
 Başarılı derleme sonrası build çıktısı sketch klasörünün `build/` altında oluşur (arduino-cli sürümüne göre yol değişebilir).
 
@@ -83,10 +97,13 @@ Firmware ve host smoke testleri **115200** baud kullanır.
 
 ## Build helper script
 
-Parametre zorunlu FQBN ile:
+Parametre zorunlu FQBN ile (DevKitC-1 N16R8 örneği):
 
 ```powershell
-.\scripts\firmware_compile.ps1 -Sketch firmware\newbot_real_v1 -Fqbn <TARGET_FQBN>
+$Fqbn = "esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=default"
+
+.\scripts\firmware_compile.ps1 -Sketch firmware\newbot_real_v1 -Fqbn $Fqbn
+.\scripts\firmware_compile.ps1 -Sketch firmware\newbot_loopback_v1 -Fqbn $Fqbn
 ```
 
 FQBN verilmezse script güvenli şekilde hata verir; varsayılan FQBN kullanmaz.
