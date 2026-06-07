@@ -19,7 +19,7 @@ Bu klasör, mevcut `newbot_loopback_v1` akışını bozmadan **gerçek donanıma
 
 - Gerçek motor sürüşü (PWM/step-dir), enkoder, PID, odometri
 - Gerçek kalem aktüatörü (servo) sürüşü
-- Tam kuyruk/plan tamponu (full queue)
+- Gercek motor/servo uzerinde fiziksel dogrulama
 - Sürekli telemetri/streaming
 
 ## Desteklenen komutlar (wire girişi)
@@ -68,7 +68,14 @@ Amaç: Mevcut host akışının (`BEGIN` … komutlar … `END` sonrası `DONE`)
   - hareket devam ediyorsa, hareket bitince **tek `DONE`**
   - batch hata aldıysa **ek `DONE` yok** (ERR ile biter)
 
-Limitasyon:
+Patch 2 note:
+- Supported DSL lines between `BEGIN` and `END` are now queued FIFO and do not start motion immediately.
+- `END` starts queued execution; exactly one final `DONE` is emitted after the whole queue completes.
+- Empty `BEGIN`/`END` returns `DONE`.
+- Queue overflow returns `ERR queue_full` and enters the safe hard-stop path.
+- The queue is still stub-motion only; real PWM/encoder/PID is not implemented.
+
+Eski Patch 1 limitasyonu (Patch 2 notu guncel davranistir):
 - Batch içinde **tek** motion komutu güvenli kabul edilir.
 - Batch içinde ikinci motion komutu şu an desteklenmez: **`ERR busy`**.
 

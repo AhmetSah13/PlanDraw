@@ -19,6 +19,7 @@ HTTP veya API kullanılmaz.
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
 from pathlib import Path
 
@@ -27,6 +28,7 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 from app.drivers.serial_driver import SerialDriver
+from app.drivers.socket_driver import SocketDriver
 from app.execution.commands import Command, ForwardCommand, PenCommand, SpeedCommand
 
 
@@ -178,9 +180,97 @@ def run_status(port: str, baudrate: int, timeout_s: float) -> int:
         ser.close()
 
 
+def run_socket_normal(host: str, port: int, timeout_s: float) -> int:
+    cmds = [
+        SpeedCommand(1.0),
+        PenCommand(is_down=False),
+        PenCommand(is_down=True),
+        ForwardCommand(0.05),
+    ]
+    print("--- socket normal mod ---")
+    print("Komut ozeti:", _batch_summary(cmds))
+    drv = SocketDriver(host=host, port=port, timeout_s=timeout_s)
+    drv.connect()
+    try:
+        drv.send_commands(cmds)
+        print("Sonuc: BASARILI (responder DONE)")
+        return 0
+    except Exception as exc:
+        print("Sonuc: BASARISIZ:", exc)
+        return 1
+    finally:
+        drv.disconnect()
+
+
+def run_socket_stop(host: str, port: int, timeout_s: float) -> int:
+    cmds = [SpeedCommand(1.0), ForwardCommand(0.02)]
+    print("--- socket stop modu (batch sonrasi STOP) ---")
+    print("Komut ozeti:", _batch_summary(cmds))
+    drv = SocketDriver(host=host, port=port, timeout_s=timeout_s)
+    drv.connect()
+    try:
+        drv.send_commands(cmds)
+        print("Batch tamam, STOP gonderiliyor...")
+        drv.stop()
+        print("Sonuc: BASARILI (STOP sonrasi DONE)")
+        return 0
+    except Exception as exc:
+        print("Sonuc: BASARISIZ:", exc)
+        return 1
+    finally:
+        drv.disconnect()
+
+
+def _socket_roundtrip(host: str, port: int, timeout_s: float, payload: bytes) -> bytes:
+    with socket.create_connection((host, port), timeout=timeout_s) as sock:
+        sock.settimeout(timeout_s)
+        sock.sendall(payload)
+        reader = sock.makefile("rb")
+        try:
+            return reader.readline()
+        finally:
+            reader.close()
+
+
+def run_socket_malformed(host: str, port: int, timeout_s: float) -> int:
+    print("--- socket malformed mod (hatali MOVE) ---")
+    payload = b"BEGIN\nMOVE\nEND\n"
+    print("Gonderilen (bytes):", payload)
+    try:
+        raw = _socket_roundtrip(host, port, timeout_s, payload)
+        print("Gelen satir:", raw.decode("utf-8", errors="replace").strip())
+        if raw.startswith(b"ERR"):
+            print("Sonuc: BASARILI (responder ERR beklenen)")
+            return 0
+        print("Sonuc: BEKLENMEDI (ERR yok)")
+        return 1
+    except Exception as exc:
+        print("Sonuc: BASARISIZ:", exc)
+        return 1
+
+
+def run_socket_status(host: str, port: int, timeout_s: float) -> int:
+    print("--- socket status modu (STATUS -> responder yaniti) ---")
+    drv = SocketDriver(host=host, port=port, timeout_s=timeout_s)
+    drv.connect()
+    try:
+        text = drv.query_status()
+        print("Gelen STATUS:", text)
+        print("Sonuc: BASARILI (responder STATUS yaniti)")
+        return 0
+    except Exception as exc:
+        print("Sonuc: BASARISIZ:", exc)
+        return 1
+    finally:
+        drv.disconnect()
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Serial loopback firmware duman testi")
-    p.add_argument("port", help="COM3, /dev/ttyUSB0, ...")
+    p.add_argument("serial_port", nargs="?", help="COM3, /dev/ttyUSB0, ...")
+    p.add_argument("--driver", choices=("serial", "socket"), default="serial")
+    p.add_argument("--host", default="127.0.0.1", help="socket driver host")
+    p.add_argument("--port", dest="socket_port", type=int, default=9000, help="socket driver port")
     p.add_argument("--baudrate", type=int, default=115200)
     p.add_argument("--timeout", type=float, default=2.0, help="okuma zaman aşımı (s)")
     p.add_argument(
@@ -194,19 +284,37 @@ def main() -> int:
     )
     args = p.parse_args()
 
-    print("Port:", args.port)
+    if args.driver == "socket":
+        print("Driver: socket")
+        print("Host:", args.host)
+        print("Port:", args.socket_port)
+        print("Timeout (s):", args.timeout)
+        print("Mod:", args.mode)
+        print()
+        if args.mode == "malformed":
+            return run_socket_malformed(args.host, args.socket_port, args.timeout)
+        if args.mode == "status":
+            return run_socket_status(args.host, args.socket_port, args.timeout)
+        if args.mode == "stop":
+            return run_socket_stop(args.host, args.socket_port, args.timeout)
+        return run_socket_normal(args.host, args.socket_port, args.timeout)
+
+    if not args.serial_port:
+        p.error("serial driver requires serial_port (for socket use --driver socket)")
+
+    print("Port:", args.serial_port)
     print("Baud:", args.baudrate)
     print("Timeout (s):", args.timeout)
     print("Mod:", args.mode)
     print()
 
     if args.mode == "malformed":
-        return run_malformed(args.port, args.baudrate, args.timeout)
+        return run_malformed(args.serial_port, args.baudrate, args.timeout)
     if args.mode == "status":
-        return run_status(args.port, args.baudrate, args.timeout)
+        return run_status(args.serial_port, args.baudrate, args.timeout)
     if args.mode == "stop":
-        return run_stop(args.port, args.baudrate, args.timeout)
-    return run_normal(args.port, args.baudrate, args.timeout)
+        return run_stop(args.serial_port, args.baudrate, args.timeout)
+    return run_normal(args.serial_port, args.baudrate, args.timeout)
 
 
 if __name__ == "__main__":

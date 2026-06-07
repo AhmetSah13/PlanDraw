@@ -70,6 +70,7 @@ class SerialDriver:
         self._last_start: tuple[float, float] = (0.0, 0.0)
         self._last_metadata: dict[str, Any] | None = None
         self._last_send_ok: bool = False
+        self._last_stop_ok: bool = False
         self._last_error: str | None = None
 
     def connect(self) -> None:
@@ -98,18 +99,26 @@ class SerialDriver:
                 pass
             self._conn = None
 
-    def stop(self) -> None:
+    def send_stop(self, *, require_connected: bool = True) -> None:
+        """Tek satirlik STOP komutunu gonderir ve gerekiyorsa DONE bekler."""
         self._stopped = True
         self._last_error = None
+        self._last_stop_ok = False
         if self._conn is None or not self._conn.is_open:
+            if require_connected:
+                raise RuntimeError("serial bagli degil; STOP gonderilemedi")
             return
         try:
             self._conn.write(wire_text_to_bytes(frame_stop_line()))
             if self._expect_done:
                 self._read_until_done()
+            self._last_stop_ok = True
         except Exception as exc:
             self._last_error = str(exc)
             raise
+
+    def stop(self) -> None:
+        self.send_stop(require_connected=False)
 
     def send_commands(
         self,
@@ -165,6 +174,7 @@ class SerialDriver:
             "pyserial_available": serial_mod is not None,
             "last_command_count": len(self._last_commands),
             "last_send_succeeded": self._last_send_ok,
+            "last_stop_succeeded": self._last_stop_ok,
             "last_error": self._last_error,
             "stopped": self._stopped,
             "last_start": list(self._last_start),

@@ -120,10 +120,25 @@ export interface SerialCalistirmaYaniti {
   error_detail?: string | null;
   artifact_paths: string[];
   notes: string[];
+  trace_id?: string | null;
+  commands_sha256?: string | null;
+  preflight_summary?: Record<string, unknown> | null;
+  ok?: boolean | null;
+  stopped?: boolean | null;
+  mode?: string | null;
+  error_code?: string | null;
+}
+
+export interface LiveSerialStopYaniti extends SerialCalistirmaYaniti {
+  ok?: boolean;
+  stopped?: boolean;
+  mode?: string;
 }
 
 export interface SerialCalistirmaSecenekleri {
   dryRun: boolean;
+  walls?: number[][];
+  preflight?: AnalyzeYaniti;
 }
 
 export interface IsDurdurmaYaniti {
@@ -201,11 +216,15 @@ export function compilePlanText(planText: string) {
   });
 }
 
-export function analyzeCommands(commandsText: string, walls?: number[][]) {
+export function analyzeCommands(
+  commandsText: string,
+  walls?: number[][],
+  collisionMode: "warn" | "error" = "warn",
+) {
   return postJson<AnalyzeYaniti>("/api/analyze", {
     commands_text: commandsText,
     walls,
-    collision_mode: "warn"
+    collision_mode: collisionMode
   });
 }
 
@@ -240,7 +259,13 @@ export function executeSerialRun(
   return postJson<SerialCalistirmaYaniti>("/api/execute_serial", {
     text,
     dry_run: options.dryRun,
+    walls: options.walls,
+    preflight: options.preflight,
   });
+}
+
+export function stopLiveSerialExecution() {
+  return postJson<LiveSerialStopYaniti>("/api/execute_serial/stop", {});
 }
 
 export function exportCommands(

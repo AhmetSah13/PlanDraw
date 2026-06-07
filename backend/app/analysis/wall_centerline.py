@@ -445,9 +445,13 @@ def extract_wall_centerlines(
     metrics["hybrid_applied_centerline_length_m"] = float(centerline_total_len)
     metrics["hybrid_applied_ratio"] = coverage
 
-    # Coverage çok düşükse (ör: sadece küçük bir kısım double-wall) hibrit çizimi
-    # tüm plana yaymak yerine güvenli fallback uygula.
-    if coverage < cfg.min_centerline_ratio_vs_input:
+    unmatched_indices = [idx for idx in range(len(segments)) if idx not in used]
+
+    # Coverage çok düşükse ve elde tutulacak tekil segment yoksa güvenli fallback uygula.
+    # Hibrit modun amacı, eşleşen double-wall çiftlerini centerline'a çevirirken
+    # eşleşmeyen tekil duvarları aynen korumaktır; bu yüzden kısmi eşleşmede fallback
+    # bütün planı geri almamalıdır.
+    if not unmatched_indices and coverage < cfg.min_centerline_ratio_vs_input:
         metrics["fallback_used"] = True
         metrics["fallback_reason"] = "LOW_COVERAGE"
         metrics["hybrid_used"] = False
@@ -462,7 +466,6 @@ def extract_wall_centerlines(
     metrics["dropped_as_non_wall_count"] = max(0, len(segments) - 2 * pairs_used)
 
     # Hibrit segment listesi: normalize edilmiş centerline + eşleşmeyen orijinal segmentler
-    unmatched_indices = [idx for idx in range(len(segments)) if idx not in used]
     hybrid_segments: List[SegmentIn] = []
     hybrid_segments.extend(centerline_segments_final)
     for idx in unmatched_indices:

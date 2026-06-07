@@ -26,6 +26,9 @@ public:
   // STOP komutunda busy iptal edilir; host DONE'i hemen alir.
   void onStop(uint32_t nowMs);
 
+  // Merkezi guvenli durdurma: motion + actuator + busy/done state tek yerden temizlenir.
+  void hardStop(uint32_t nowMs, const char* reason, bool fault = false);
+
   // Tick: hareket bittiyse DONE yollamak icin true doner.
   bool tick(uint32_t nowMs);
 

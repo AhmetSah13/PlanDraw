@@ -119,6 +119,14 @@ class ExecuteSerialRequest(BaseModel):
     text: str = Field(default="", description="DSL senaryo metni")
     start: Optional[Tuple[float, float]] = None
     optimize: Optional[OptimizeConfigOut] = None
+    walls: Optional[List[List[float]]] = Field(
+        default=None,
+        description="Canlı gönderim öncesi backend final collision analizi için duvar segmentleri.",
+    )
+    preflight: Optional[AnalyzeResponse] = Field(
+        default=None,
+        description="Canlı gönderim öncesi /api/analyze sonucu; dry_run=false için zorunludur.",
+    )
     dry_run: bool = Field(
         default=True,
         description="True: UART açılmaz; yalnızca artifact + özet. False: SERIAL_PORT gerekir.",
@@ -133,6 +141,25 @@ class ExecuteSerialResponse(BaseModel):
     error_detail: Optional[str] = None
     artifact_paths: List[str] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+    trace_id: Optional[str] = None
+    commands_sha256: Optional[str] = None
+    preflight_summary: Optional[Dict[str, Any]] = None
+    ok: Optional[bool] = Field(
+        default=None,
+        description="POST /api/execute_serial/stop: istek başarıyla işlendi mi.",
+    )
+    stopped: Optional[bool] = Field(
+        default=None,
+        description="POST /api/execute_serial/stop: STOP komutu MCU tarafında onaylandı mı.",
+    )
+    mode: Optional[str] = Field(
+        default=None,
+        description="Stop hedefi: active_driver | temporary_driver | no_driver.",
+    )
+    error_code: Optional[str] = Field(
+        default=None,
+        description="Makine-okunur hata kodu (ör. SERIAL_PORT_MISSING).",
+    )
 
 
 class ExportRequest(BaseModel):

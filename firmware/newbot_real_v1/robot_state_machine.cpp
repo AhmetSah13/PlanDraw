@@ -12,6 +12,7 @@ RobotStateMachine::RobotStateMachine(ActuatorInterface* act)
 void RobotStateMachine::begin() {
   if (m_act) m_act->begin();
   m_motion.begin();
+  if (m_act) m_act->stopAll();
 
   m_lastError = "none";
   m_donePending = false;
@@ -43,13 +44,13 @@ uint16_t RobotStateMachine::queued() const { return m_motion.queued(); }
 
 bool RobotStateMachine::onHome(uint32_t nowMs) {
   if (m_state == RS_BUSY) {
-    setError("busy");
+    hardStop(nowMs, "busy");
     return false;
   }
 
   bool ok = m_motion.startHome(nowMs);
   if (!ok) {
-    setError("busy");
+    hardStop(nowMs, "busy");
     return false;
   }
 
@@ -61,13 +62,13 @@ bool RobotStateMachine::onHome(uint32_t nowMs) {
 
 bool RobotStateMachine::onMove(uint32_t nowMs, float x, float y) {
   if (m_state == RS_BUSY) {
-    setError("busy");
+    hardStop(nowMs, "busy");
     return false;
   }
 
   bool ok = m_motion.startMove(nowMs, x, y);
   if (!ok) {
-    setError("busy");
+    hardStop(nowMs, "busy");
     return false;
   }
 
@@ -79,10 +80,15 @@ bool RobotStateMachine::onMove(uint32_t nowMs, float x, float y) {
 
 void RobotStateMachine::onStop(uint32_t nowMs) {
   // STOP oncelikli: busy iptal ve hosta DONE hemen gonderilir.
+  hardStop(nowMs, "none");
+}
+
+void RobotStateMachine::hardStop(uint32_t nowMs, const char* reason, bool fault) {
   m_motion.stop(nowMs);
+  if (m_act) m_act->stopAll();
   m_donePending = false;
-  m_state = RS_STOPPED;
-  m_lastError = "none";
+  m_state = fault ? RS_FAULT : RS_STOPPED;
+  m_lastError = reason ? reason : "stopped";
   m_stopReleaseMs = nowMs + 200;
 }
 
@@ -114,9 +120,7 @@ bool RobotStateMachine::tick(uint32_t nowMs) {
 }
 
 void RobotStateMachine::setFault(const char* reason) {
-  m_state = RS_FAULT;
-  m_lastError = reason ? reason : "ariza";
-  m_donePending = false;
+  hardStop(millis(), reason ? reason : "ariza", true);
 }
 
 void RobotStateMachine::setError(const char* reason) {

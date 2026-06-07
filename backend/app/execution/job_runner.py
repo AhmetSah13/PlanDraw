@@ -176,6 +176,11 @@ def run_command_execution_job(
             driver_status=st,
         )
     except Exception as exc:
+        try:
+            driver.stop()
+            base_notes.append("Driver hatasi sonrasi STOP komutu denendi.")
+        except Exception as stop_exc:
+            base_notes.append(f"Driver hatasi sonrasi STOP denemesi basarisiz: {stop_exc!s}")
         return ExecutionResult(
             status="failed",
             message=f"Driver hatası: {exc!s}",

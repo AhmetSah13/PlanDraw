@@ -3,7 +3,8 @@
 #include <Arduino.h>
 
 // Bu asamada sadece arabirim var; gercek motor/pwm/encoder yok.
-// Ileride motor surumu eklenirken sadece bu sinirlar korunur.
+// Ileride motor surumu eklenirken stopAll() merkezi guvenli durdurma
+// siniri olarak korunur: motor gucu kesilir ve actuator safe state'e alinir.
 class ActuatorInterface {
 public:
   virtual ~ActuatorInterface() {}

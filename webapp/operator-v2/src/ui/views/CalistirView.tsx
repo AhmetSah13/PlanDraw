@@ -3,10 +3,13 @@ import { useMutation } from "@tanstack/react-query";
 import { COPY } from "../../content";
 import { ApiError } from "../../data/http/apiClient";
 import {
+  analyzeCommands,
   buildSimulationStreamUrl,
   createSimulationJob,
   executeSerialRun,
+  stopLiveSerialExecution,
   stopSimulationJob,
+  type AnalyzeYaniti,
 } from "../../data/services/operatorService";
 import {
   applySerialRunResult,
@@ -14,6 +17,9 @@ import {
   attachSimulationJob,
   createInitialExecutionSnapshot,
   isJobNotFoundMessage,
+  isLiveSerialExecutionActive,
+  markLiveSerialStopStarting,
+  markLiveSerialStopSuccess,
   markReconnectStarting,
   markRequestFailure,
   markSerialRunStarting,
@@ -25,6 +31,10 @@ import {
   type ExecutionSnapshot,
   type TechnicalEntry,
 } from "../../lifecycle/execution/executionLifecycle";
+import {
+  getLiveSerialGate,
+  type LiveSerialGateReason,
+} from "../../lifecycle/execution/serialSafety";
 import { useWorkflowStore } from "../../workflow/store/workflowStore";
 import { SimulationPlayer } from "../components/SimulationPlayer";
 
@@ -48,8 +58,60 @@ function formatTechnicalDetail(entry: TechnicalEntry) {
   return `${entry.etiket}: ${entry.detay}`;
 }
 
+function analyzeBlocksLive(yanit: AnalyzeYaniti) {
+  return Boolean(
+    yanit.blocked ||
+      yanit.parser.length ||
+      yanit.analysis.length ||
+      (yanit.stats.collision_count ?? 0) > 0 ||
+      (yanit.stats.wall_proper_cross_count ?? 0) > 0,
+  );
+}
+
+function resolveApiStopMessage(error: ApiError) {
+  if (typeof error.data === "object" && error.data !== null) {
+    const payload = error.data as Record<string, unknown>;
+    if (typeof payload.message === "string" && payload.message.trim()) {
+      return payload.message;
+    }
+  }
+
+  return COPY.ekranlar.calistir.mesajlar.canliStopBasarisiz;
+}
+
+function liveGateMessage(reason: LiveSerialGateReason) {
+  const mesajlar = COPY.ekranlar.calistir.mesajlar;
+  if (reason === "plan-yok") {
+    return mesajlar.planHazirDegil;
+  }
+  if (reason === "hizalama-yok") {
+    return mesajlar.canliHizalamaYok;
+  }
+  if (reason === "hizalama-riskli") {
+    return mesajlar.canliHizalamaRiskli;
+  }
+  if (reason === "kontrol-yok") {
+    return mesajlar.canliKontrolYok;
+  }
+  if (reason === "kontrol-blocked") {
+    return mesajlar.canliKontrolBlocked;
+  }
+  if (reason === "kontrol-bulgusu") {
+    return mesajlar.canliKontrolBulgusu;
+  }
+  if (reason === "carpisma-riski") {
+    return mesajlar.canliCarpismaRiski;
+  }
+  if (reason === "onay-yok") {
+    return mesajlar.canliCalistirmaEngelli;
+  }
+  return mesajlar.canliHazir;
+}
+
 export function CalistirView() {
   const planHazirligi = useWorkflowStore((state) => state.planHazirligi);
+  const hizalamaDurumu = useWorkflowStore((state) => state.hizalamaDurumu);
+  const kontrolDurumu = useWorkflowStore((state) => state.kontrolDurumu);
   const setAktifAsama = useWorkflowStore((state) => state.setAktifAsama);
   const setCalistirmaOzeti = useWorkflowStore((state) => state.setCalistirmaOzeti);
   const simulation = useWorkflowStore((state) => state.simulation);
@@ -185,6 +247,44 @@ export function CalistirView() {
     },
   });
 
+  const liveSerialStopMutation = useMutation({
+    mutationFn: async () => stopLiveSerialExecution(),
+    onMutate: () => {
+      setSnapshot((current) => markLiveSerialStopStarting(current));
+    },
+    onSuccess: (result) => {
+      if (result.ok === false || result.stopped === false) {
+        const message =
+          result.message || COPY.ekranlar.calistir.mesajlar.canliStopBasarisiz;
+        setSnapshot((current) =>
+          markRequestFailure(
+            current,
+            message,
+            COPY.ekranlar.calistir.teknik.canliStop,
+          ),
+        );
+        return;
+      }
+
+      setSnapshot((current) => markLiveSerialStopSuccess(current));
+    },
+    onError: (error) => {
+      const message =
+        error instanceof ApiError
+          ? resolveApiStopMessage(error)
+          : error instanceof Error
+            ? error.message
+            : COPY.ekranlar.calistir.mesajlar.canliStopBasarisiz;
+      setSnapshot((current) =>
+        markRequestFailure(
+          current,
+          message,
+          COPY.ekranlar.calistir.teknik.canliStop,
+        ),
+      );
+    },
+  });
+
   const stopMutation = useMutation({
     mutationFn: async () => {
       if (!snapshot.jobId) {
@@ -228,7 +328,37 @@ export function CalistirView() {
         throw new Error(COPY.ekranlar.calistir.mesajlar.planHazirDegil);
       }
 
-      return executeSerialRun(planHazirligi.komutMetni, { dryRun });
+      if (!dryRun) {
+        const gate = getLiveSerialGate({
+          planHazirligi,
+          hizalamaDurumu,
+          kontrolDurumu,
+          canliOnay,
+        });
+
+        if (!gate.allowed) {
+          throw new Error(liveGateMessage(gate.reason));
+        }
+      }
+
+      let livePreflight = kontrolDurumu?.yanit;
+      if (!dryRun) {
+        livePreflight = await analyzeCommands(
+          planHazirligi.komutMetni,
+          planHazirligi.duvarlar,
+          "error",
+        );
+
+        if (analyzeBlocksLive(livePreflight)) {
+          throw new Error(COPY.ekranlar.calistir.mesajlar.canliFinalKontrolBlocked);
+        }
+      }
+
+      return executeSerialRun(planHazirligi.komutMetni, {
+        dryRun,
+        walls: dryRun ? undefined : planHazirligi.duvarlar,
+        preflight: dryRun ? undefined : livePreflight,
+      });
     },
     onMutate: (dryRun) => {
       setSnapshot((current) =>
@@ -258,8 +388,22 @@ export function CalistirView() {
     snapshot.faz === "yenidenBaglaniyor" ||
     snapshot.faz === "durduruluyor";
 
-  const seriCalismaEngelli =
+  const dryRunEngelli =
     !planHazir || aktifSimulasyonVar || serialMutation.isPending || simulationMutation.isPending;
+  const liveSerialGate = getLiveSerialGate({
+    planHazirligi,
+    hizalamaDurumu,
+    kontrolDurumu,
+    canliOnay,
+  });
+  const canliSeriEngelli = dryRunEngelli || !liveSerialGate.allowed;
+  const canliGateMesaji = liveGateMessage(liveSerialGate.reason);
+  const canliSerialStopAktif =
+    isLiveSerialExecutionActive(snapshot) && serialMutation.isPending;
+  const canliSerialStopEngelli =
+    !canliSerialStopAktif ||
+    liveSerialStopMutation.isPending ||
+    stopMutation.isPending;
 
   const sonTick = snapshot.sonTick;
 
@@ -390,7 +534,7 @@ export function CalistirView() {
                   className="secondary-button"
                   type="button"
                   onClick={() => serialMutation.mutate(true)}
-                  disabled={seriCalismaEngelli}
+                  disabled={dryRunEngelli}
                 >
                   {COPY.butonlar.onKontrolCalistir}
                 </button>
@@ -408,9 +552,9 @@ export function CalistirView() {
                 </span>
               </label>
 
-              {!canliOnay && !seriCalismaEngelli ? (
+              {!liveSerialGate.allowed && !dryRunEngelli ? (
                 <p className="execute-inline-warning">
-                  {COPY.ekranlar.calistir.mesajlar.canliCalistirmaEngelli}
+                  {canliGateMesaji}
                 </p>
               ) : null}
 
@@ -420,14 +564,30 @@ export function CalistirView() {
                 </p>
               ) : null}
 
-              <button
-                className="danger-button"
-                type="button"
-                onClick={() => serialMutation.mutate(false)}
-                disabled={seriCalismaEngelli || !canliOnay}
-              >
-                {COPY.butonlar.canliCalistir}
-              </button>
+              <div className="execute-card__actions">
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() => serialMutation.mutate(false)}
+                  disabled={canliSeriEngelli || liveSerialStopMutation.isPending}
+                >
+                  {COPY.butonlar.canliCalistir}
+                </button>
+                {canliSerialStopAktif ? (
+                  <button
+                    className="danger-button"
+                    type="button"
+                    onClick={() => liveSerialStopMutation.mutate()}
+                    disabled={canliSerialStopEngelli}
+                  >
+                    {liveSerialStopMutation.isPending
+                      ? COPY.ekranlar.calistir.mesajlar.canliStopGonderiliyor
+                      : COPY.butonlar.canliSerialStop}
+                  </button>
+                ) : null}
+              </div>
+
+              <p className="execute-inline-warning">{COPY.ekranlar.calistir.canliStopUyari}</p>
             </article>
           </div>
 
@@ -501,7 +661,7 @@ export function CalistirView() {
             <div className="execute-tech__body">
               <div>
                 <span>{COPY.ortak.endpointBilgisi}</span>
-                <strong>/api/jobs · /api/jobs/{'{'}id{'}'}/stream · /api/jobs/{'{'}id{'}'}/stop · /api/execute_serial</strong>
+                <strong>/api/jobs · /api/jobs/{'{'}id{'}'}/stream · /api/jobs/{'{'}id{'}'}/stop · /api/execute_serial · /api/execute_serial/stop</strong>
               </div>
               <div>
                 <span>{COPY.ortak.riskSeviyesi}</span>

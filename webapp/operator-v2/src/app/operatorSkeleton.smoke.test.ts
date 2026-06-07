@@ -1,11 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { COPY, STAGE_LIST } from "../content";
 import {
   applySimulationStreamEvent,
   createInitialExecutionSnapshot,
+  isLiveSerialExecutionActive,
+  markLiveSerialStopSuccess,
+  markSerialRunStarting,
   markStopMissing,
   updateExecutionSnapshot,
 } from "../lifecycle/execution/executionLifecycle";
+import { stopLiveSerialExecution } from "../data/services/operatorService";
+import { getLiveSerialGate } from "../lifecycle/execution/serialSafety";
 
 describe("operator v2 iskeleti", () => {
   it("ana akış etiketlerini Türkçe ve tam sırada taşır", () => {
@@ -76,4 +81,139 @@ describe("operator v2 iskeleti", () => {
     expect(COPY.ekranlar.kontrolEt.ustBaslik).toBe("Kontrol Et");
     expect(COPY.ekranlar.sonuclar.ustBaslik).toBe("Sonuçlar");
   });
+
+  it("canlı serial gate kontrol sonucu yokken veya blocked iken kapalıdır", () => {
+    const planHazirligi = { komutMetni: "SPEED 1\nMOVE 0 0" } as never;
+    const hizalamaDurumu = {
+      durum: "hazir",
+      yanit: { alignment: { blocked: false } },
+    } as never;
+
+    expect(
+      getLiveSerialGate({
+        planHazirligi,
+        hizalamaDurumu,
+        kontrolDurumu: null,
+        canliOnay: true,
+      }),
+    ).toEqual({ allowed: false, reason: "kontrol-yok" });
+
+    expect(
+      getLiveSerialGate({
+        planHazirligi,
+        hizalamaDurumu,
+        kontrolDurumu: {
+          yanit: {
+            blocked: true,
+            parser: [],
+            analysis: [],
+            stats: { collision_count: 0, wall_proper_cross_count: 0 },
+          },
+        } as never,
+        canliOnay: true,
+      }),
+    ).toEqual({ allowed: false, reason: "kontrol-blocked" });
+  });
+
+  it("canlı serial gate hizalama blocked veya çarpışma bulgusunda kapalıdır", () => {
+    const planHazirligi = { komutMetni: "SPEED 1\nMOVE 0 0" } as never;
+    const kontrolDurumu = {
+      yanit: {
+        blocked: false,
+        parser: [],
+        analysis: [],
+        stats: { collision_count: 0, wall_proper_cross_count: 0 },
+      },
+    } as never;
+
+    expect(
+      getLiveSerialGate({
+        planHazirligi,
+        hizalamaDurumu: {
+          durum: "dikkat",
+          yanit: { alignment: { blocked: true } },
+        } as never,
+        kontrolDurumu,
+        canliOnay: true,
+      }),
+    ).toEqual({ allowed: false, reason: "hizalama-riskli" });
+
+    expect(
+      getLiveSerialGate({
+        planHazirligi,
+        hizalamaDurumu: {
+          durum: "hazir",
+          yanit: { alignment: { blocked: false } },
+        } as never,
+        kontrolDurumu: {
+          yanit: {
+            blocked: false,
+            parser: [],
+            analysis: [],
+            stats: { collision_count: 1, wall_proper_cross_count: 1 },
+          },
+        } as never,
+        canliOnay: true,
+      }),
+    ).toEqual({ allowed: false, reason: "carpisma-riski" });
+  });
+
+  it("canlı serial gate tüm kanıtlar ve kullanıcı onayı varsa açılır", () => {
+    expect(
+      getLiveSerialGate({
+        planHazirligi: { komutMetni: "SPEED 1\nMOVE 0 0" } as never,
+        hizalamaDurumu: {
+          durum: "hazir",
+          yanit: { alignment: { blocked: false } },
+        } as never,
+        kontrolDurumu: {
+          yanit: {
+            blocked: false,
+            parser: [],
+            analysis: [],
+            stats: { collision_count: 0, wall_proper_cross_count: 0 },
+          },
+        } as never,
+        canliOnay: true,
+      }),
+    ).toEqual({ allowed: true, reason: "hazir" });
+  });
+  it("canlı serial stop lifecycle ve servis uç noktasını ayırır", async () => {
+    const ready = createInitialExecutionSnapshot({ planHazir: true, girdiAdi: "plan.json" });
+    const starting = markSerialRunStarting(ready, "serial-canli");
+
+    expect(isLiveSerialExecutionActive(starting)).toBe(true);
+    expect(COPY.butonlar.canliSerialStop).toBe("Robotu durdur (canlı STOP)");
+    expect(COPY.butonlar.isiDurdur).toBe("İşi durdur");
+    expect(COPY.ekranlar.calistir.canliStopUyari).toContain("yazılımsal STOP");
+
+    const stopped = markLiveSerialStopSuccess(starting);
+    expect(stopped.mesaj).toBe(COPY.ekranlar.calistir.mesajlar.canliStopGonderildi);
+    expect(stopped.canLiveSerialStop).toBe(false);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          status: "sent",
+          message: "ok",
+          command_count: 0,
+          artifact_paths: [],
+          notes: [],
+          ok: true,
+          stopped: true,
+          mode: "active_driver",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await stopLiveSerialExecution();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/execute_serial/stop"),
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    vi.unstubAllGlobals();
+  });
+
 });

@@ -48,6 +48,7 @@ export interface ExecutionSnapshot {
   jobId: string | null;
   planHazir: boolean;
   canStop: boolean;
+  canLiveSerialStop: boolean;
   canReconnect: boolean;
   canRetry: boolean;
   sonTick: ExecutionTick | null;
@@ -140,6 +141,7 @@ export function createInitialExecutionSnapshot(
       jobId: null,
       planHazir: false,
       canStop: false,
+      canLiveSerialStop: false,
       canReconnect: false,
       canRetry: false,
       sonTick: null,
@@ -160,6 +162,7 @@ export function createInitialExecutionSnapshot(
     jobId: null,
     planHazir: true,
     canStop: false,
+    canLiveSerialStop: false,
     canReconnect: false,
     canRetry: true,
     sonTick: null,
@@ -204,6 +207,7 @@ export function markSimulationStarting(previous: ExecutionSnapshot) {
       mesaj: COPY.ekranlar.calistir.mesajlar.simulasyonBaslatiliyor,
       jobId: null,
       canStop: false,
+      canLiveSerialStop: false,
       canReconnect: false,
       canRetry: false,
       serialSonucu: null,
@@ -471,6 +475,7 @@ export function markRequestFailure(
       baslik: COPY.durumlar.hata,
       mesaj: message,
       canStop: false,
+      canLiveSerialStop: false,
       canReconnect: Boolean(previous.jobId),
       canRetry: Boolean(previous.planHazir),
     },
@@ -498,6 +503,7 @@ export function markSerialRunStarting(
         ? COPY.ekranlar.calistir.mesajlar.canliCalistirmaBaslatiliyor
         : COPY.ekranlar.calistir.mesajlar.onKontrolBaslatiliyor,
       canStop: false,
+      canLiveSerialStop: canlı,
       canReconnect: false,
       canRetry: false,
       serialSonucu: null,
@@ -507,6 +513,56 @@ export function markSerialRunStarting(
       detay: canlı
         ? "/api/execute_serial dry_run=false isteği gönderildi."
         : "/api/execute_serial dry_run=true isteği gönderildi.",
+    },
+  );
+}
+
+export function isLiveSerialExecutionActive(snapshot: ExecutionSnapshot) {
+  return (
+    snapshot.kip === "serial-canli" &&
+    snapshot.faz === "baslatiliyor" &&
+    snapshot.canLiveSerialStop
+  );
+}
+
+export function markLiveSerialStopStarting(previous: ExecutionSnapshot) {
+  return patchSnapshot(
+    previous,
+    {
+      faz: "durduruluyor",
+      ton: "dikkat",
+      baslik: COPY.durumlar.dikkat,
+      mesaj: COPY.ekranlar.calistir.mesajlar.canliStopGonderiliyor,
+      canStop: false,
+      canLiveSerialStop: false,
+      canReconnect: false,
+      canRetry: false,
+    },
+    {
+      etiket: COPY.ekranlar.calistir.teknik.canliStop,
+      detay: "/api/execute_serial/stop isteği gönderildi.",
+      ton: "uyari",
+    },
+  );
+}
+
+export function markLiveSerialStopSuccess(previous: ExecutionSnapshot) {
+  return patchSnapshot(
+    previous,
+    {
+      faz: "durduruldu",
+      ton: "dikkat",
+      baslik: COPY.durumlar.dikkat,
+      mesaj: COPY.ekranlar.calistir.mesajlar.canliStopGonderildi,
+      canStop: false,
+      canLiveSerialStop: false,
+      canReconnect: false,
+      canRetry: true,
+    },
+    {
+      etiket: COPY.ekranlar.calistir.teknik.canliStop,
+      detay: "Canlı serial STOP komutu backend üzerinden iletildi.",
+      ton: "uyari",
     },
   );
 }
@@ -530,6 +586,7 @@ export function applySerialRunResult(
       baslik: normalizeStatusTitle(tone),
       mesaj: result.message,
       canStop: false,
+      canLiveSerialStop: false,
       canReconnect: false,
       canRetry: true,
       serialSonucu: result,

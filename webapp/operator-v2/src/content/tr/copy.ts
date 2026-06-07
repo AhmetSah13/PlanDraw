@@ -64,6 +64,7 @@ export const TR_COPY = {
     simulasyonuYenidenBaslat: "Simülasyonu yeniden başlat",
     yenidenBaglan: "Yeniden bağlan",
     isiDurdur: "İşi durdur",
+    canliSerialStop: "Robotu durdur (canlı STOP)",
     onKontrolCalistir: "Ön kontrol çalıştır",
     canliCalistir: "Canlı gönderimi başlat",
     hizalamayiDogrula: "Hizalamayı doğrula",
@@ -301,11 +302,34 @@ export const TR_COPY = {
           "İş artık aktif listede görünmüyor. Bu durum kırmızı hata yerine yaşam döngüsü bilgisi olarak gösterildi.",
         onKontrolBaslatiliyor: "Ön kontrol çalıştırılıyor.",
         canliCalistirmaBaslatiliyor: "Canlı gönderim başlatılıyor.",
+        canliHazir:
+          "Canlı gönderim için plan, hizalama ve kontrol sonucu hazır. Son onayla devam edebilirsiniz.",
         canliCalistirmaEngelli:
           "Canlı gönderim için önce risk onayını verin veya aktif simülasyonu durdurun.",
+        canliHizalamaYok:
+          "Canlı gönderim için önce Hizala ekranında saha eşleşmesini doğrulayın.",
+        canliHizalamaRiskli:
+          "Hizalama sonucu riskli görünüyor. Blocked veya uyarılı hizalama ile canlı gönderim başlatılamaz.",
+        canliKontrolYok:
+          "Canlı gönderim için önce Kontrol Et ekranında analiz sonucunu alın.",
+        canliKontrolBlocked:
+          "Kontrol sonucu engelli. Blocked analiz sonucu canlı gönderime geçemez.",
+        canliKontrolBulgusu:
+          "Kontrol sonucunda parser veya analiz bulgusu var. Bulgular kapanmadan canlı gönderim başlatılamaz.",
+        canliCarpismaRiski:
+          "Kontrol sonucunda çarpışma riski var. Çarpışma riski kapanmadan canlı gönderim başlatılamaz.",
+        canliFinalKontrolBlocked:
+          "Canlı gönderim öncesi final kontrol engel buldu. Komutlar donanıma gönderilmedi.",
         aktifSimulasyonVar:
-          "Aktif simülasyon sürerken canlı gönderim başlatılamaz. Önce işi durdurun veya tamamlanmasını bekleyin."
+          "Aktif simülasyon sürerken canlı gönderim başlatılamaz. Önce işi durdurun veya tamamlanmasını bekleyin.",
+        canliStopGonderiliyor: "Canlı serial STOP komutu gönderiliyor.",
+        canliStopGonderildi:
+          "STOP komutu seri hatta iletildi. Robot durumu donanım yanıtına bağlıdır.",
+        canliStopBasarisiz:
+          "Canlı STOP gönderilemedi. Fiziksel acil stop kullanın ve bağlantıyı kontrol edin."
       },
+      canliStopUyari:
+        "Bu düğme yalnızca yazılımsal STOP gönderir. Fiziksel acil stop'un yerini tutmaz.",
       kartlar: {
         simulasyonDurumu: "Simülasyon durumu",
         canliDurumu: "Canlı gönderim durumu",
@@ -316,6 +340,7 @@ export const TR_COPY = {
         jobKaydi: "Job kaydı",
         stream: "Stream bağlantısı",
         stop: "Durdurma isteği",
+        canliStop: "Canlı serial STOP",
         serial: "Canlı gönderim",
         sonOlay: "Son olay"
       }

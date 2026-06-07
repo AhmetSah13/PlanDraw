@@ -120,3 +120,45 @@ def test_profile_a_framing() -> None:
     assert "BEGIN" not in fake.written_text
     assert "SPEED" in fake.written_text
     d.disconnect()
+
+
+def test_send_stop_writes_single_stop_and_waits_done() -> None:
+    fake = _FakeSerialPort([b"DONE\n"])
+    d = SerialDriver("COM1", serial_connection=fake)
+    d.connect()
+    d.send_stop()
+    assert fake.written_text == "STOP\n"
+    st = d.get_status()
+    assert st["stopped"] is True
+    assert st["last_stop_succeeded"] is True
+    d.disconnect()
+
+
+def test_send_stop_requires_connection_by_default() -> None:
+    fake = _FakeSerialPort([b"DONE\n"])
+    d = SerialDriver("COM1", serial_connection=fake)
+    with pytest.raises(RuntimeError, match="STOP"):
+        d.send_stop()
+
+
+def test_send_stop_err_raises_runtime_error() -> None:
+    fake = _FakeSerialPort([b"ERR stopped_failed\n"])
+    d = SerialDriver("COM1", serial_connection=fake)
+    d.connect()
+    with pytest.raises(RuntimeError, match="MCU ERR"):
+        d.send_stop()
+    assert d.get_status()["last_stop_succeeded"] is False
+    d.disconnect()
+
+
+def test_send_stop_timeout_raises_and_marks_failure() -> None:
+    fake = _FakeSerialPort([])
+    d = SerialDriver("COM1", serial_connection=fake, timeout_s=0.01)
+    d.connect()
+    with pytest.raises(TimeoutError, match="yanıt"):
+        d.send_stop()
+    st = d.get_status()
+    assert st["last_stop_succeeded"] is False
+    assert st["stopped"] is True
+    assert st["last_error"] is not None
+    d.disconnect()

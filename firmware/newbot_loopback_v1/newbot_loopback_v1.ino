@@ -33,6 +33,7 @@ struct QueuedCmd {
 enum AppState : uint8_t { ST_IDLE, ST_RECEIVING, ST_RUNNING };
 
 static String g_lineBuf;
+static bool g_lineOverflow = false;
 static QueuedCmd g_queue[MAX_CMDS];
 static size_t g_qCount;
 static AppState g_state = ST_IDLE;
@@ -49,6 +50,15 @@ static CmdType g_lastCmdType = CMD_NONE;
 static void sendErr(const char *msg) {
   Serial.print("ERR ");
   Serial.println(msg);
+}
+
+static void resetQueue();
+static void goIdle();
+
+static void failSafe(const char *msg) {
+  resetQueue();
+  goIdle();
+  sendErr(msg);
 }
 
 static void trimInPlace(String &s) {
@@ -247,6 +257,7 @@ static void applyExecutedCommand(const QueuedCmd &c) {
 static void handleStop() {
   resetQueue();
   goIdle();
+  g_penDown = false;
   Serial.println("DONE");
 }
 
@@ -270,16 +281,20 @@ static void processCompleteLine(String line) {
   }
 
   if (mu == "BEGIN") {
+    if (g_state == ST_RUNNING) {
+      failSafe("busy");
+      return;
+    }
     g_state = ST_RECEIVING;
     resetQueue();
     g_lastCmdType = CMD_NONE;
+    Serial.println("OK");
     return;
   }
 
   if (mu == "END") {
     if (g_state != ST_RECEIVING) {
-      sendErr("parse");
-      goIdle();
+      failSafe("end_without_begin");
       return;
     }
     g_state = ST_RUNNING;
@@ -289,28 +304,25 @@ static void processCompleteLine(String line) {
   }
 
   if (g_state == ST_RUNNING) {
+    failSafe("busy");
     return;
   }
 
   if (g_state == ST_RECEIVING) {
     QueuedCmd qc{};
     if (!parseDslLine(line, qc)) {
-      sendErr("parse");
-      resetQueue();
-      goIdle();
+      failSafe("parse");
       return;
     }
     if (g_qCount >= MAX_CMDS) {
-      sendErr("limit");
-      resetQueue();
-      goIdle();
+      failSafe("queue_full");
       return;
     }
     g_queue[g_qCount++] = qc;
     return;
   }
 
-  sendErr("unknown");
+  failSafe("unknown");
 }
 
 static void feedSerial() {
@@ -318,11 +330,21 @@ static void feedSerial() {
     char c = (char)Serial.read();
     if (c == '\r') continue;
     if (c == '\n') {
+      if (g_lineOverflow) {
+        failSafe("line_too_long");
+        g_lineOverflow = false;
+        g_lineBuf = "";
+        continue;
+      }
       processCompleteLine(g_lineBuf);
       g_lineBuf = "";
       continue;
     }
-    if (g_lineBuf.length() < (int)MAX_LINE - 1) g_lineBuf += c;
+    if (g_lineBuf.length() < (int)MAX_LINE - 1) {
+      g_lineBuf += c;
+    } else {
+      g_lineOverflow = true;
+    }
   }
 }
 

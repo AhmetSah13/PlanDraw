@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import functools
 import json
 import math
@@ -18,7 +19,7 @@ _root = Path(__file__).resolve().parents[2]
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -230,6 +231,19 @@ def _execute_serial_access_guard(request: Request) -> Optional[JSONResponse]:
 
 # dry_run=False: aynı anda tek canlı gönderim (UART çakışmasını önler).
 _execute_serial_live_lock = threading.Lock()
+_execute_serial_active_driver_lock = threading.Lock()
+_execute_serial_active_driver: Any | None = None
+
+
+def _set_execute_serial_active_driver(driver: Any | None) -> None:
+    global _execute_serial_active_driver
+    with _execute_serial_active_driver_lock:
+        _execute_serial_active_driver = driver
+
+
+def _get_execute_serial_active_driver() -> Any | None:
+    with _execute_serial_active_driver_lock:
+        return _execute_serial_active_driver
 
 
 def _serial_live_env_ok() -> tuple[bool, str]:
@@ -268,7 +282,52 @@ def _build_serial_driver_for_execute(*, baudrate: int) -> "SerialDriver":
     return SerialDriver(port, baudrate=int(baudrate))
 
 
-def _execution_result_to_serial_response(r: ExecutionResult) -> ExecuteSerialResponse:
+def _driver_send_stop(driver: Any) -> None:
+    send_stop = getattr(driver, "send_stop", None)
+    if callable(send_stop):
+        send_stop(require_connected=True)
+        return
+    driver.stop()
+
+
+def _execute_serial_stop_response(
+    *,
+    ok: bool,
+    stopped: bool,
+    mode: str,
+    message: str,
+    trace_id: str,
+    driver_status: dict | None = None,
+    error_code: str | None = None,
+    error_detail: str | None = None,
+    notes: list[str] | None = None,
+    http_status: int = 200,
+) -> ExecuteSerialResponse | JSONResponse:
+    body = ExecuteSerialResponse(
+        status="sent" if ok and stopped else "failed",
+        message=message,
+        command_count=0,
+        driver_status=driver_status,
+        error_detail=error_detail or error_code,
+        trace_id=trace_id,
+        notes=list(notes or []),
+        ok=ok,
+        stopped=stopped,
+        mode=mode,
+        error_code=error_code,
+    )
+    if http_status == 200:
+        return body
+    return JSONResponse(status_code=http_status, content=body.model_dump())
+
+
+def _execution_result_to_serial_response(
+    r: ExecutionResult,
+    *,
+    trace_id: str | None = None,
+    commands_sha256: str | None = None,
+    preflight_summary: dict | None = None,
+) -> ExecuteSerialResponse:
     return ExecuteSerialResponse(
         status=r.status,
         message=r.message,
@@ -277,7 +336,130 @@ def _execution_result_to_serial_response(r: ExecutionResult) -> ExecuteSerialRes
         error_detail=r.error_detail,
         artifact_paths=list(r.artifact_paths),
         notes=list(r.notes),
+        trace_id=trace_id,
+        commands_sha256=commands_sha256,
+        preflight_summary=preflight_summary,
     )
+
+
+def _commands_sha256(commands: List[Command]) -> str:
+    return hashlib.sha256(serialize_commands(commands).encode("utf-8")).hexdigest()
+
+
+def _execute_serial_preflight_rejection(
+    req: ExecuteSerialRequest,
+    commands: List[Command],
+    parser_diags: List[Diagnostic],
+    start_pt: Tuple[float, float],
+) -> tuple[ExecuteSerialResponse | None, dict]:
+    """
+    dry_run=False için donanım öncesi final gate.
+
+    İstemciden gelen /api/analyze preflight sonucu zorunlu tutulur, ayrıca backend aynı
+    komut listesini collision_mode="error" ile yeniden analiz eder. Böylece frontend
+    hatası veya eski UI akışı tek başına canlı UART gönderimine yetmez.
+    """
+    command_text = serialize_commands(commands)
+    command_hash = _commands_sha256(commands)
+    preflight = req.preflight
+
+    summary = {
+        "required": True,
+        "provided": preflight is not None,
+        "commands_sha256": command_hash,
+        "server_collision_mode": "error",
+        "walls_provided": bool(req.walls),
+    }
+
+    if preflight is None:
+        return (
+            ExecuteSerialResponse(
+                status="failed",
+                message="Canlı gönderim için /api/analyze preflight sonucu zorunludur.",
+                command_count=len(commands),
+                error_detail="PREFLIGHT_REQUIRED",
+                preflight_summary=summary,
+                commands_sha256=command_hash,
+            ),
+            summary,
+        )
+
+    summary.update(
+        {
+            "client_blocked": bool(preflight.blocked),
+            "client_collision_count": int(getattr(preflight.stats, "collision_count", 0) or 0),
+            "client_parser_count": len(preflight.parser),
+            "client_analysis_count": len(preflight.analysis),
+        }
+    )
+
+    if preflight.commands_unrolled.strip() != command_text.strip():
+        return (
+            ExecuteSerialResponse(
+                status="failed",
+                message="Preflight komut metni canlı gönderilecek komutla eşleşmiyor.",
+                command_count=len(commands),
+                error_detail="PREFLIGHT_COMMAND_MISMATCH",
+                preflight_summary=summary,
+                commands_sha256=command_hash,
+            ),
+            summary,
+        )
+
+    client_has_diagnostics = bool(preflight.parser or preflight.analysis)
+    client_collision_count = int(getattr(preflight.stats, "collision_count", 0) or 0)
+    client_proper_cross = int(getattr(preflight.stats, "wall_proper_cross_count", 0) or 0)
+    if preflight.blocked or client_has_diagnostics or client_collision_count > 0 or client_proper_cross > 0:
+        return (
+            ExecuteSerialResponse(
+                status="failed",
+                message="Preflight sonucu canlı gönderime uygun değil; blocked, bulgu veya çarpışma riski var.",
+                command_count=len(commands),
+                error_detail="PREFLIGHT_BLOCKED",
+                preflight_summary=summary,
+                commands_sha256=command_hash,
+            ),
+            summary,
+        )
+
+    stats, analysis_diags = analyze_commands(
+        commands,
+        start=start_pt,
+        limits=None,
+        walls=req.walls,
+        collision_mode="error",
+        optimize_cfg=None,
+    )
+    server_parser_count = len(parser_diags)
+    server_analysis_count = len(analysis_diags)
+    summary.update(
+        {
+            "server_blocked": bool(parser_diags or analysis_diags),
+            "server_collision_count": int(getattr(stats, "collision_count", 0) or 0),
+            "server_wall_proper_cross_count": int(getattr(stats, "wall_proper_cross_count", 0) or 0),
+            "server_parser_count": server_parser_count,
+            "server_analysis_count": server_analysis_count,
+            "move_count": int(getattr(stats, "move_count", 0) or 0),
+            "path_length": float(getattr(stats, "path_length", 0.0) or 0.0),
+        }
+    )
+
+    if parser_diags or analysis_diags or stats.collision_count > 0 or stats.wall_proper_cross_count > 0:
+        notes = [d.message for d in [*parser_diags, *analysis_diags][:8]]
+        return (
+            ExecuteSerialResponse(
+                status="failed",
+                message="Backend final analizi canlı gönderimi engelledi.",
+                command_count=len(commands),
+                error_detail="SERVER_PREFLIGHT_BLOCKED",
+                notes=notes,
+                preflight_summary=summary,
+                commands_sha256=command_hash,
+            ),
+            summary,
+        )
+
+    return None, summary
 
 
 # Resmi yerel standart:
@@ -1721,6 +1903,105 @@ def export_robot(req: ExportRequest) -> ExportResponse:
 
 
 @app.post(
+    "/api/execute_serial/stop",
+    response_model=ExecuteSerialResponse,
+    responses={
+        400: {"model": ExecuteSerialResponse},
+        403: {"model": ExecuteSerialResponse},
+        500: {"model": ExecuteSerialResponse},
+    },
+)
+def stop_execute_serial(request: Request):
+    """Canli serial execution icin tekil STOP komutu gonderir (sim job stop degil)."""
+    guard = _execute_serial_access_guard(request)
+    if guard is not None:
+        return guard
+
+    trace_id = uuid.uuid4().hex[:12]
+    active_driver = _get_execute_serial_active_driver()
+
+    if active_driver is not None:
+        try:
+            _driver_send_stop(active_driver)
+            return _execute_serial_stop_response(
+                ok=True,
+                stopped=True,
+                mode="active_driver",
+                message="Aktif seri driver'a STOP komutu gonderildi.",
+                trace_id=trace_id,
+                driver_status=active_driver.get_status(),
+                notes=["target=active_serial_driver"],
+            )
+        except Exception as exc:
+            return _execute_serial_stop_response(
+                ok=False,
+                stopped=False,
+                mode="active_driver",
+                message=f"STOP komutu aktif seri driver'a gonderilemedi: {exc!s}",
+                trace_id=trace_id,
+                error_code="STOP_SEND_FAILED",
+                error_detail=str(exc),
+                http_status=500,
+            )
+
+    live_ok, live_msg = _serial_live_env_ok()
+    if not live_ok:
+        return _execute_serial_stop_response(
+            ok=False,
+            stopped=False,
+            mode="no_driver",
+            message=live_msg,
+            trace_id=trace_id,
+            error_code="SERIAL_PORT_MISSING",
+            http_status=400,
+        )
+
+    baud, baud_err = _parse_serial_baud_from_env()
+    if baud is None:
+        return _execute_serial_stop_response(
+            ok=False,
+            stopped=False,
+            mode="no_driver",
+            message=baud_err or "SERIAL_BAUD gecersiz.",
+            trace_id=trace_id,
+            error_code="INVALID_SERIAL_BAUD",
+            http_status=400,
+        )
+
+    driver = None
+    try:
+        driver = _build_serial_driver_for_execute(baudrate=baud)
+        driver.connect()
+        _driver_send_stop(driver)
+        return _execute_serial_stop_response(
+            ok=True,
+            stopped=True,
+            mode="temporary_driver",
+            message="Seri porta STOP komutu gonderildi.",
+            trace_id=trace_id,
+            driver_status=driver.get_status(),
+            notes=["target=serial_port"],
+        )
+    except Exception as exc:
+        return _execute_serial_stop_response(
+            ok=False,
+            stopped=False,
+            mode="temporary_driver",
+            message=f"STOP komutu gonderilemedi: {exc!s}",
+            trace_id=trace_id,
+            error_code="STOP_SEND_FAILED",
+            error_detail=str(exc),
+            http_status=500,
+        )
+    finally:
+        if driver is not None:
+            try:
+                driver.disconnect()
+            except Exception:
+                pass
+
+
+@app.post(
     "/api/execute_serial",
     response_model=ExecuteSerialResponse,
     responses={
@@ -1764,17 +2045,24 @@ def execute_serial(req: ExecuteSerialRequest, request: Request):
     if not prep.commands:
         return ExecuteSerialResponse(status="skipped", message="Komut listesi boş.", command_count=0)
 
+    trace_id = uuid.uuid4().hex[:12]
+    command_hash = _commands_sha256(prep.commands)
     opts = ExecutionJobOptions(
         dry_run=req.dry_run,
         start_xy=(float(prep.start_pt[0]), float(prep.start_pt[1])),
         artifact_dir=_execute_serial_artifact_dir(),
-        artifact_basename=f"execute_serial_{uuid.uuid4().hex[:12]}",
+        artifact_basename=f"execute_serial_{trace_id}",
     )
     ctx = ExecutionContext()
 
     if req.dry_run:
         result = run_command_execution_job(prep.commands, driver=None, options=opts, context=ctx)
-        return _execution_result_to_serial_response(result)
+        return _execution_result_to_serial_response(
+            result,
+            trace_id=trace_id,
+            commands_sha256=command_hash,
+            preflight_summary={"required": False, "commands_sha256": command_hash},
+        )
 
     live_ok, live_msg = _serial_live_env_ok()
     if not live_ok:
@@ -1783,6 +2071,8 @@ def execute_serial(req: ExecuteSerialRequest, request: Request):
             message=live_msg,
             command_count=len(prep.commands),
             error_detail="SERIAL_PORT_MISSING",
+            trace_id=trace_id,
+            commands_sha256=command_hash,
         )
         return JSONResponse(status_code=400, content=body.model_dump())
 
@@ -1793,8 +2083,21 @@ def execute_serial(req: ExecuteSerialRequest, request: Request):
             message=baud_err or "SERIAL_BAUD geçersiz.",
             command_count=len(prep.commands),
             error_detail="INVALID_SERIAL_BAUD",
+            trace_id=trace_id,
+            commands_sha256=command_hash,
         )
         return JSONResponse(status_code=400, content=body.model_dump())
+
+    preflight_rejection, preflight_summary = _execute_serial_preflight_rejection(
+        req,
+        prep.commands,
+        prep.parser_diags,
+        prep.start_pt,
+    )
+    if preflight_rejection is not None:
+        preflight_rejection.trace_id = trace_id
+        preflight_rejection.commands_sha256 = command_hash
+        return JSONResponse(status_code=409, content=preflight_rejection.model_dump())
 
     if not _execute_serial_live_lock.acquire(blocking=False):
         body = ExecuteSerialResponse(
@@ -1802,13 +2105,25 @@ def execute_serial(req: ExecuteSerialRequest, request: Request):
             message="Başka bir seri gönderim sürüyor; bitince tekrar deneyin.",
             command_count=len(prep.commands),
             error_detail="SERIAL_EXECUTION_BUSY",
+            trace_id=trace_id,
+            commands_sha256=command_hash,
+            preflight_summary=preflight_summary,
         )
         return JSONResponse(status_code=409, content=body.model_dump())
 
     try:
         driver = _build_serial_driver_for_execute(baudrate=baud)
-        result = run_command_execution_job(prep.commands, driver=driver, options=opts, context=ctx)
-        return _execution_result_to_serial_response(result)
+        _set_execute_serial_active_driver(driver)
+        try:
+            result = run_command_execution_job(prep.commands, driver=driver, options=opts, context=ctx)
+            return _execution_result_to_serial_response(
+                result,
+                trace_id=trace_id,
+                commands_sha256=command_hash,
+                preflight_summary=preflight_summary,
+            )
+        finally:
+            _set_execute_serial_active_driver(None)
     finally:
         _execute_serial_live_lock.release()
 
