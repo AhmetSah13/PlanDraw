@@ -1,7 +1,7 @@
 {
   "name": "layoutbot-operator-v3",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.5",
   "description": "LayoutBot Command Center — deneysel operatör arayüzü",
   "type": "module",
   "scripts": {

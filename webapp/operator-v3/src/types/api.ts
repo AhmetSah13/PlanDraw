@@ -47,10 +47,31 @@ export interface CompilePlanResponse {
   stats?: CompileStats;
 }
 
+export interface DiagnosticRecord {
+  severity: "ERROR" | "WARN";
+  line: number;
+  message: string;
+  text: string;
+}
+
+export interface AnalyzeStats {
+  move_count?: number;
+  wait_total?: number;
+  path_length?: number;
+  estimated_time?: number;
+  collision_count?: number;
+  wall_overlap_count?: number;
+  wall_touch_count?: number;
+  wall_proper_cross_count?: number;
+  path_points?: number[][];
+}
+
 export interface AnalyzeResponse {
   blocked: boolean;
   commands_unrolled: string;
-  stats: CompileStats;
+  parser: DiagnosticRecord[];
+  analysis: DiagnosticRecord[];
+  stats: AnalyzeStats;
 }
 
 export interface ExecuteSerialResponse {

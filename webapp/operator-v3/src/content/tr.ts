@@ -50,6 +50,14 @@ export const tr = {
     hint: "Yüklenen yol verisi burada görselleştirilir.",
     scale: "Ölçek",
     points: "Nokta",
+    simDisclaimer:
+      "Bu görsel simülasyon, üretilen çizim komutlarının önizlemesidir. Gerçek motor/zemin davranışını temsil etmez.",
+    simRunning: "Komut önizlemesi oynatılıyor…",
+    simCompleted: "Simülasyon tamamlandı",
+    simProgress: "İlerleme",
+    simJob: "Job",
+    travelLegend: "Kalem yukarı",
+    drawLegend: "Çizim",
   },
   telemetry: {
     title: "Sistem Durumu",
@@ -110,7 +118,9 @@ export const tr = {
       "Robot hareket etmez; üretilen komutlar ve güvenli gönderim akışı test edilir.",
     simulate: "Simülasyonu Başlat",
     simulateHint:
-      "Bu adım çizim komutlarını simülasyon işine gönderir. Canlı animasyon henüz bağlı değildir.",
+      "Bu adım çizim komutlarını simülasyon işine gönderir. Başarılı yanıt job oluşturmayı doğrular; canlı animasyon henüz bağlı değildir.",
+    simJobCreated:
+      "Simülasyon işi oluşturuldu; canlı animasyon henüz bağlı değil (job doğrulama adımı).",
     live: "Canlı Robota Gönder",
     stop: "Robotu Durdur (Canlı STOP)",
     stopNote: "Yazılımsal STOP komutudur. Fiziksel acil stop'un yerini tutmaz.",

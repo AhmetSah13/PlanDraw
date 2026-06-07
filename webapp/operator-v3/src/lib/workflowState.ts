@@ -59,17 +59,65 @@ export function newPlanActivityLog(fileName: string): string[] {
   return [formatActivityLog("INFO", `Yeni plan seçildi: ${fileName}`)];
 }
 
+/** Yeni plan seçildiğinde uygulanacak tam workflow sıfırlama paketi (test edilebilir). */
+export interface PlanResetPatch {
+  commandsText: string;
+  walls: number[][];
+  pathPoints: number[][];
+  preflight: null;
+  planName: null;
+  pipeline: Record<PipelineStepId, StepStatus>;
+  penSafeKnown: boolean;
+  penSafe: boolean;
+  simJobId: null;
+  serialMode: null;
+  activeMode: "idle";
+  actionFeedback: null;
+  activityLog: string[];
+}
+
+export function buildPlanResetPatch(fileName: string): PlanResetPatch {
+  return {
+    commandsText: "",
+    walls: [],
+    pathPoints: [],
+    preflight: null,
+    planName: null,
+    pipeline: pipelineAfterFileSelect(),
+    penSafeKnown: false,
+    penSafe: false,
+    simJobId: null,
+    serialMode: null,
+    activeMode: "idle",
+    actionFeedback: null,
+    activityLog: newPlanActivityLog(fileName),
+  };
+}
+
+/** Derleme başlangıcında dry-run/sim/live türev adımlarını sıfırlar. */
+export function pipelineAfterDerivedReset(): Record<PipelineStepId, StepStatus> {
+  return {
+    upload: "ready",
+    analyze: "waiting",
+    compile: "waiting",
+    simulate: "waiting",
+    send: "waiting",
+  };
+}
+
+export function nextPlanSessionId(current: number): number {
+  return current + 1;
+}
+
+export function isPlanSessionCurrent(expected: number, actual: number): boolean {
+  return expected === actual;
+}
+
 export function isDryRunSuccess(res: ExecuteSerialResponse): boolean {
   if (res.ok === false) return false;
   if (res.ok === true) return true;
   const status = (res.status ?? "").toLowerCase();
-  return (
-    status === "completed" ||
-    status === "dry_run" ||
-    status === "success" ||
-    status === "sent" ||
-    status === "ok"
-  );
+  return status === "completed" || status === "dry_run" || status === "success" || status === "ok";
 }
 
 export function buildDryRunFeedback(
@@ -133,7 +181,8 @@ export function buildSimFeedback(
     phase: "success",
     title: "Simülasyon işi oluşturuldu",
     message: jobId ? `job_id=${jobId}` : "Simülasyon işi oluşturuldu",
-    detail: "Canlı animasyon henüz bağlı değil.",
+    detail:
+      "Canlı animasyon henüz bağlı değil; bu adım şimdilik job oluşturma doğrulamasıdır.",
   };
 }
 

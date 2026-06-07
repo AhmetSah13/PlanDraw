@@ -65,7 +65,7 @@ describe("workflowState", () => {
   it("buildSimFeedback stream bağlı değil uyarısını içerir", () => {
     const fb = buildSimFeedback("success", "job-abc-123");
     expect(fb.message).toContain("job-abc-123");
-    expect(fb.detail).toContain("Canlı animasyon henüz bağlı değil");
+    expect(fb.detail).toContain("job oluşturma doğrulamasıdır");
   });
 
   it("formatDryRunLog OK prefix kullanır", () => {

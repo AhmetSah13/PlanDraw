@@ -1,7 +1,9 @@
 import type {
   AnalyzeResponse,
+  AnalyzeStats,
   CompilePlanRequest,
   CompilePlanResponse,
+  DiagnosticRecord,
   ExecuteSerialResponse,
   HealthResponse,
   ImportPlanResponse,
@@ -24,9 +26,32 @@ export class ApiError extends Error {
   }
 }
 
+function mapExecuteSerialErrorCode(code: string | null | undefined): string | null {
+  switch (code) {
+    case "SERIAL_PORT_MISSING":
+      return "Seri port ayarlı değil (SERIAL_PORT env eksik).";
+    case "INVALID_SERIAL_BAUD":
+      return "Seri port baud ayarı geçersiz (SERIAL_BAUD).";
+    default:
+      return null;
+  }
+}
+
 /** Kullanıcıya gösterilecek Türkçe hata metni. */
 export function formatUserError(error: unknown): string {
   if (error instanceof ApiError) {
+    const row = asRecord(error.data);
+    const mapped =
+      mapExecuteSerialErrorCode(
+        typeof row.error_detail === "string"
+          ? row.error_detail
+          : typeof row.error_code === "string"
+            ? row.error_code
+            : null,
+      ) ?? mapExecuteSerialErrorCode(
+        typeof row.detail === "string" ? row.detail : null,
+      );
+    if (mapped) return mapped;
     return error.message;
   }
   if (error instanceof TypeError) {
@@ -50,14 +75,46 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
+/** FastAPI 422 validation detail → kısa Türkçe özet. */
+export function formatValidationDetail(detail: unknown): string | null {
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (!Array.isArray(detail)) return null;
+
+  const parts = detail
+    .map((item) => {
+      const row = asRecord(item);
+      const loc = Array.isArray(row.loc)
+        ? row.loc.filter((p) => p !== "body").join(".")
+        : "";
+      const msg = typeof row.msg === "string" ? row.msg : "";
+      if (!msg) return "";
+      return loc ? `${loc}: ${msg}` : msg;
+    })
+    .filter(Boolean);
+
+  return parts.length ? parts.slice(0, 3).join("; ") : null;
+}
+
 function resolveError(data: unknown, status: number): string {
   if (typeof data === "object" && data !== null) {
     const row = data as Record<string, unknown>;
+    const mapped = mapExecuteSerialErrorCode(
+      typeof row.error_detail === "string" ? row.error_detail : null,
+    );
+    if (mapped) return mapped;
+
+    const validation = formatValidationDetail(row.detail);
+    if (validation) {
+      if (status === 422) return `Backend doğrulama hatası: ${validation}`;
+      return validation;
+    }
+
     const detail = row.detail ?? row.error ?? row.message;
     if (typeof detail === "string" && detail.trim()) return detail;
   }
   if (status === 403) return "Erişim reddedildi (execute_serial güvenlik kısıtı).";
   if (status === 409) return "Seri port meşgul — eşzamanlı canlı gönderim yapılamıyor.";
+  if (status === 422) return "İstek geçersiz — backend şema doğrulaması başarısız.";
   if (status >= 500) return "Sunucu hatası. Backend loglarını kontrol edin.";
   return `İstek başarısız (HTTP ${status})`;
 }
@@ -207,6 +264,51 @@ export async function compilePlan(req: CompilePlanRequest): Promise<CompilePlanR
   };
 }
 
+function normalizeDiagnostics(raw: unknown): DiagnosticRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DiagnosticRecord[] = [];
+  for (const item of raw) {
+    const row = asRecord(item);
+    const severity: DiagnosticRecord["severity"] =
+      row.severity === "ERROR" || row.severity === "WARN" ? row.severity : "WARN";
+    const record: DiagnosticRecord = {
+      severity,
+      line: typeof row.line === "number" ? row.line : 0,
+      message: typeof row.message === "string" ? row.message : "",
+      text: typeof row.text === "string" ? row.text : "",
+    };
+    if (record.message || record.text) out.push(record);
+  }
+  return out;
+}
+
+function normalizeAnalyzeStats(raw: unknown): AnalyzeStats {
+  const row = asRecord(raw);
+  return {
+    move_count: typeof row.move_count === "number" ? row.move_count : 0,
+    wait_total: typeof row.wait_total === "number" ? row.wait_total : 0,
+    path_length: typeof row.path_length === "number" ? row.path_length : 0,
+    estimated_time: typeof row.estimated_time === "number" ? row.estimated_time : undefined,
+    collision_count: typeof row.collision_count === "number" ? row.collision_count : 0,
+    wall_overlap_count: typeof row.wall_overlap_count === "number" ? row.wall_overlap_count : 0,
+    wall_touch_count: typeof row.wall_touch_count === "number" ? row.wall_touch_count : 0,
+    wall_proper_cross_count:
+      typeof row.wall_proper_cross_count === "number" ? row.wall_proper_cross_count : 0,
+  };
+}
+
+/** Backend /api/analyze yanıtını ExecuteSerialRequest.preflight şemasına uygun normalize eder. */
+export function normalizeAnalyzeResponse(data: unknown): AnalyzeResponse {
+  const row = asRecord(data);
+  return {
+    blocked: row.blocked === true,
+    commands_unrolled: typeof row.commands_unrolled === "string" ? row.commands_unrolled : "",
+    parser: normalizeDiagnostics(row.parser),
+    analysis: normalizeDiagnostics(row.analysis),
+    stats: normalizeAnalyzeStats(row.stats),
+  };
+}
+
 export async function analyzeCommands(
   commandsText: string,
   walls?: number[][],
@@ -216,27 +318,44 @@ export async function analyzeCommands(
     walls,
     collision_mode: "warn",
   });
-  const row = asRecord(data);
-  return {
-    blocked: row.blocked === true,
-    commands_unrolled: typeof row.commands_unrolled === "string" ? row.commands_unrolled : "",
-    stats:
-      typeof row.stats === "object" && row.stats !== null
-        ? (row.stats as AnalyzeResponse["stats"])
-        : {},
+  return normalizeAnalyzeResponse(data);
+}
+
+export interface ExecuteSerialOptions {
+  dryRun: boolean;
+  walls?: number[][];
+  preflight?: AnalyzeResponse;
+}
+
+/**
+ * POST /api/execute_serial gövdesi — backend ExecuteSerialRequest ile uyumlu.
+ * dry_run=true iken preflight gönderilmez (eksik AnalyzeResponse 422 üretir).
+ */
+export function buildExecuteSerialPayload(
+  text: string,
+  options: ExecuteSerialOptions,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    text,
+    dry_run: options.dryRun,
   };
+  if (options.walls?.length) {
+    body.walls = options.walls;
+  }
+  if (!options.dryRun && options.preflight) {
+    body.preflight = options.preflight;
+  }
+  return body;
 }
 
 export async function executeSerial(
   text: string,
-  options: { dryRun: boolean; walls?: number[][]; preflight?: AnalyzeResponse },
+  options: ExecuteSerialOptions,
 ): Promise<ExecuteSerialResponse> {
-  const data = await postJson<unknown>("/api/execute_serial", {
-    text,
-    dry_run: options.dryRun,
-    walls: options.walls,
-    preflight: options.preflight,
-  });
+  const data = await postJson<unknown>(
+    "/api/execute_serial",
+    buildExecuteSerialPayload(text, options),
+  );
   return normalizeExecuteResponse(data);
 }
 

@@ -26,10 +26,17 @@ import {
 } from "./services/api";
 import { loadDemoPlan, type DemoPlanId } from "./services/demoPlans";
 import type { AnalyzeResponse } from "./types/api";
+import {
+  buildSimulationSegments,
+  createIdlePlayback,
+  startPlayback,
+  type SimPlayback,
+} from "./lib/commandSimulation";
 import type { ActionFeedback } from "./lib/workflowState";
 import {
   buildDryRunFeedback,
   buildLiveFeedback,
+  buildPlanResetPatch,
   buildSimFeedback,
   formatActivityLog,
   formatDryRunLog,
@@ -37,9 +44,10 @@ import {
   formatSimLog,
   INITIAL_PIPELINE,
   isDryRunSuccess,
-  newPlanActivityLog,
+  isPlanSessionCurrent,
+  nextPlanSessionId,
   pipelineAfterCompile,
-  pipelineAfterFileSelect,
+  pipelineAfterDerivedReset,
 } from "./lib/workflowState";
 
 const SECTION_IDS: Record<MissionSection, string> = {
@@ -77,8 +85,12 @@ export default function App() {
   const [activityLog, setActivityLog] = useState<string[]>([]);
   const [serialMode, setSerialMode] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
+  const [simPlayback, setSimPlayback] = useState<SimPlayback>(createIdlePlayback);
 
   const sectionRefs = useRef<Partial<Record<MissionSection, HTMLElement | null>>>({});
+  const simRunCounter = useRef(0);
+  const planSessionRef = useRef(0);
+  const playbackSessionRef = useRef(0);
 
   const strokeCount = useMemo(
     () => (commandsText ? countStrokes(commandsText) : 0),
@@ -94,26 +106,40 @@ export default function App() {
     setPipeline((prev) => ({ ...prev, [id]: status }));
   }, []);
 
-  const resetPlanWorkflow = useCallback(
-    (fileName: string) => {
-      setCommandsText("");
-      setWalls([]);
-      setPathPoints([]);
-      setPreflight(null);
-      setPlanName(null);
-      setPipeline(pipelineAfterFileSelect());
-      setPenSafeKnown(false);
-      setPenSafe(false);
-      setSimJobId(null);
-      setSerialMode(null);
-      setActiveMode("idle");
-      setRobotLabel(tr.telemetry.unknown);
-      setActionFeedback(null);
-      setActivityLog(newPlanActivityLog(fileName));
-      setLastUpdate(formatTime(new Date()));
-    },
-    [],
-  );
+  const resetPlanWorkflow = useCallback((fileName: string) => {
+    planSessionRef.current = nextPlanSessionId(planSessionRef.current);
+    playbackSessionRef.current = 0;
+    simRunCounter.current = 0;
+    setBusy(false);
+
+    const patch = buildPlanResetPatch(fileName);
+    setCommandsText(patch.commandsText);
+    setWalls(patch.walls);
+    setPathPoints(patch.pathPoints);
+    setPreflight(patch.preflight);
+    setPlanName(patch.planName);
+    setPipeline(patch.pipeline);
+    setPenSafeKnown(patch.penSafeKnown);
+    setPenSafe(patch.penSafe);
+    setSimJobId(patch.simJobId);
+    setSerialMode(patch.serialMode);
+    setActiveMode(patch.activeMode);
+    setRobotLabel(tr.telemetry.unknown);
+    setActionFeedback(patch.actionFeedback);
+    setSimPlayback(createIdlePlayback());
+    setActivityLog(patch.activityLog);
+    setLastUpdate(formatTime(new Date()));
+  }, []);
+
+  const handlePlaybackUpdate = useCallback((next: SimPlayback) => {
+    if (!isPlanSessionCurrent(playbackSessionRef.current, planSessionRef.current)) return;
+    setSimPlayback(next);
+  }, []);
+
+  const handleSimulationComplete = useCallback(() => {
+    if (!isPlanSessionCurrent(playbackSessionRef.current, planSessionRef.current)) return;
+    pushLog(formatActivityLog("OK", tr.preview.simCompleted));
+  }, [pushLog]);
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -151,6 +177,8 @@ export default function App() {
   }
 
   async function compileFile(file: File) {
+    const session = planSessionRef.current;
+
     if (!backendOnline) {
       pushLog(formatActivityLog("ERR", tr.errors.backendOffline));
       return;
@@ -162,21 +190,18 @@ export default function App() {
 
     setActionFeedback(null);
     setSimJobId(null);
+    setSimPlayback(createIdlePlayback());
+    playbackSessionRef.current = 0;
     setSerialMode(null);
     setActiveMode("idle");
-    setPipeline((prev) => ({
-      ...prev,
-      upload: "ready",
-      analyze: "waiting",
-      compile: "waiting",
-      simulate: "waiting",
-      send: "waiting",
-    }));
+    setRobotLabel(tr.telemetry.unknown);
+    setPipeline(pipelineAfterDerivedReset());
 
     pushLog(formatActivityLog("INFO", `Plan yükleniyor: ${file.name}`));
 
     const ext = file.name.split(".").pop()?.toLowerCase();
     const res = ext === "json" ? await importPlanJson(file) : await importDxf(file);
+    if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
 
     if (!res.ok) throw new Error(res.error ?? tr.errors.importFailed);
 
@@ -193,6 +218,8 @@ export default function App() {
     setPenSafe(safe);
 
     const analysis = await analyzeCommands(cmds, res.walls);
+    if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+
     setPreflight(analysis);
     setPipeline(pipelineAfterCompile(safe));
 
@@ -206,15 +233,19 @@ export default function App() {
 
   async function handleCompile() {
     if (!selectedFile) return;
+    const session = planSessionRef.current;
     setBusy(true);
     try {
       await compileFile(selectedFile);
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
       setPipeline((prev) => ({ ...prev, upload: "error" }));
       pushLog(formatActivityLog("ERR", msg));
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -224,16 +255,21 @@ export default function App() {
       return;
     }
     setBusy(true);
+    let session = planSessionRef.current;
     try {
       const file = await loadDemoPlan(id);
       resetPlanWorkflow(file.name);
+      session = planSessionRef.current;
       setSelectedFile(file);
       await compileFile(file);
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       setPipeline((prev) => ({ ...prev, upload: "error" }));
       pushLog(formatActivityLog("ERR", formatUserError(e)));
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -251,6 +287,7 @@ export default function App() {
       return;
     }
 
+    const session = planSessionRef.current;
     setBusy(true);
     setActiveMode("dryRun");
     setActionFeedback(buildDryRunFeedback("running"));
@@ -262,6 +299,7 @@ export default function App() {
         walls,
         preflight: preflight ?? undefined,
       });
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
 
       if (isDryRunSuccess(res)) {
         setRobotLabel(res.status);
@@ -271,16 +309,19 @@ export default function App() {
       } else {
         const msg = res.message || res.error_detail || "Dry-run başarısız";
         setActionFeedback(buildDryRunFeedback("error", res, msg));
-        pushLog(formatDryRunLog(false, msg));
+        pushLog(formatActivityLog("ERR", `Dry-run başarısız: ${msg}`));
       }
       scrollToLogs();
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
       setActionFeedback(buildDryRunFeedback("error", undefined, msg));
-      pushLog(formatActivityLog("ERR", msg));
+      pushLog(formatActivityLog("ERR", `Dry-run başarısız: ${msg}`));
       scrollToLogs();
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -298,6 +339,7 @@ export default function App() {
       return;
     }
 
+    const session = planSessionRef.current;
     setBusy(true);
     setActiveMode("simulation");
     setStep("simulate", "ready");
@@ -306,21 +348,31 @@ export default function App() {
 
     try {
       const job = await createSimulationJob(commandsText, walls);
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+
       setSimJobId(job.job_id);
       setStep("simulate", "success");
       setRobotLabel(`Sim: ${job.job_id.slice(0, 8)}`);
       setActionFeedback(buildSimFeedback("success", job.job_id));
       pushLog(formatSimLog(job.job_id));
-      pushLog(formatActivityLog("SIM", "Canlı animasyon henüz bağlı değil."));
+      pushLog(formatActivityLog("OK", tr.control.simJobCreated));
+      simRunCounter.current += 1;
+      playbackSessionRef.current = planSessionRef.current;
+      const segs = buildSimulationSegments(commandsText, pathPoints);
+      setSimPlayback(startPlayback(simRunCounter.current, segs));
+      navigate("plan");
       scrollToLogs();
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
       setStep("simulate", "error");
       setActionFeedback(buildSimFeedback("error", undefined, msg));
-      pushLog(formatActivityLog("ERR", msg));
+      pushLog(formatActivityLog("ERR", `Simülasyon başlatılamadı: ${msg}`));
       scrollToLogs();
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -336,6 +388,7 @@ export default function App() {
       return;
     }
 
+    const session = planSessionRef.current;
     setBusy(true);
     setActiveMode("live");
     setStep("send", "ready");
@@ -346,6 +399,7 @@ export default function App() {
       let pf = preflight;
       if (!pf) {
         pf = await analyzeCommands(commandsText, walls);
+        if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
         setPreflight(pf);
       }
       const res = await executeSerial(commandsText, {
@@ -353,6 +407,7 @@ export default function App() {
         walls,
         preflight: pf,
       });
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
 
       const liveOk = res.ok === true || res.status === "sent";
       setRobotLabel(res.status);
@@ -364,13 +419,16 @@ export default function App() {
       pushLog(formatLiveLog(liveOk, res.message));
       scrollToLogs();
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
       setStep("send", "error");
       setActionFeedback(buildLiveFeedback("error", undefined, msg));
-      pushLog(formatLiveLog(false, msg));
+      pushLog(formatActivityLog("ERR", `Canlı gönderim başarısız: ${msg}`));
       scrollToLogs();
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -396,9 +454,12 @@ export default function App() {
     try {
       await stopSimulationJob(simJobId);
       setSimJobId(null);
+      setSimPlayback(createIdlePlayback());
+      playbackSessionRef.current = 0;
       setActiveMode("idle");
       setStep("simulate", "waiting");
       setActionFeedback(null);
+      setRobotLabel(tr.telemetry.unknown);
       pushLog(formatActivityLog("OK", "Simülasyon durduruldu"));
       scrollToLogs();
     } catch (e) {
@@ -442,7 +503,16 @@ export default function App() {
         <div className="grid gap-6 xl:grid-cols-12">
           <div className="space-y-6 xl:col-span-8">
             <section id={SECTION_IDS.plan} ref={bindSection("plan")} className="scroll-mt-4">
-              <CadPreviewPanel planName={planName} points={pathPoints} strokeCount={strokeCount} />
+              <CadPreviewPanel
+                planName={planName}
+                points={pathPoints}
+                strokeCount={strokeCount}
+                commandsText={commandsText}
+                simPlayback={simPlayback}
+                simJobId={simJobId}
+                onPlaybackUpdate={handlePlaybackUpdate}
+                onSimulationComplete={handleSimulationComplete}
+              />
             </section>
 
             <section id={SECTION_IDS.derleme} ref={bindSection("derleme")} className="scroll-mt-4" />
