@@ -47,3 +47,9 @@ void serial_protocol_v1_write_status(const char* stateToken,
                                       const char* errorToken,
                                       uint16_t queued);
 
+// Opsiyonel actuator alanlari (Patch 4A); null veya bos string ise ek alan basilamaz.
+void serial_protocol_v1_write_status_ex(const char* stateToken,
+                                         const char* errorToken,
+                                         uint16_t queued,
+                                         const char* actuatorFields);
+

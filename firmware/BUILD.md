@@ -6,9 +6,13 @@ Bu belge, `firmware/newbot_real_v1` ve `firmware/newbot_loopback_v1` sketch'leri
 
 - Repoda **sabit FQBN yok**. Hedef kart modeli donanım ekibi / operatör tarafından netleştirilmeden otomatik build doğrulanmış sayılmaz.
 - Bu belge FQBN **tahmin etmez**. Komut şablonlarında `<TARGET_FQBN>` placeholder kullanılır.
-- Örnek (yalnızca referans, kesin değil):
-  - ESP32 Dev Module → muhtemelen `esp32:esp32:esp32` (kartınızı doğrulayın)
-  - Arduino Uno → farklı FQBN gerekir (`arduino:avr:uno` vb.)
+
+### Planlanan donanım (Patch 4A notu)
+
+- Kart: **ESP32-S3 DevKitC-1 N16R8** (`robot_config.h` → `BOARD_TARGET_NOTE`)
+- Muhtemel FQBN adayı (doğrulanmalı, varsayılan değil): `esp32:esp32:esp32s3`
+- Motor: 2× NEMA17 + 2× TMC2208 (STEP/DIR/EN)
+- Kalem: servo — pinler Patch 4B'de `robot_config.h` içine girilecek
 
 ## Ön koşullar
 

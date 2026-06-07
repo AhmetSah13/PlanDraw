@@ -1,15 +1,15 @@
 /*
  * NewBot real firmware v1 skeleton.
- * - Motor/pen hardware is still stubbed.
- * - SERIAL_PROTOCOL_V1 profile B is supported: BEGIN / commands / END.
- * - STOP and ERR paths use the central hardStop() safety foundation.
- *
- * This patch intentionally does not add real PWM, pins, encoders, or servo code.
+ * - Patch 4A: config-driven actuator abstraction (ESP32-S3 + 2x TMC2208 + servo placeholders).
+ * - Default: motor outputs disabled, pins unassigned, no real motion on wire.
+ * - SERIAL_PROTOCOL_V1 profile B: BEGIN / commands / END queue.
+ * - STOP and ERR paths use central hardStop() + actuatorHardStop().
  */
 
 #include <Arduino.h>
 
-#include "actuator_stub.h"
+#include "actuator_safe.h"
+#include "robot_config.h"
 #include "robot_state_machine.h"
 #include "serial_protocol_v1.h"
 
@@ -38,8 +38,18 @@ static bool g_batchReceiving = false;
 static bool g_queueRunning = false;
 static bool g_queueWaitingForMotion = false;
 
-static ActuatorStub g_act;
+static ActuatorSafe g_act;
 static RobotStateMachine g_rsm(&g_act);
+
+static char g_actuatorStatusBuf[128];
+
+static void writeStatusLine() {
+  actuatorFormatStatusFields(g_actuatorStatusBuf, sizeof(g_actuatorStatusBuf));
+  serial_protocol_v1_write_status_ex(g_rsm.stateToken(),
+                                     g_rsm.lastErrorToken(),
+                                     queuedForStatus(),
+                                     g_actuatorStatusBuf);
+}
 
 static void resetQueue() {
   g_queueCount = 0;
@@ -112,6 +122,7 @@ static void continueQueuedExecution(uint32_t nowMs) {
     const QueuedLine& q = g_queue[g_queueIndex];
     switch (q.type) {
       case TL_SPEED:
+        actuatorSetStepRateHz((uint32_t)q.f1);
         g_rsm.setError("none");
         g_queueIndex++;
         break;
@@ -208,9 +219,7 @@ static void processLine(const String& line) {
       return;
 
     case TL_STATUS:
-      serial_protocol_v1_write_status(g_rsm.stateToken(),
-                                      g_rsm.lastErrorToken(),
-                                      queuedForStatus());
+      writeStatusLine();
       return;
 
     case TL_BEGIN:
@@ -248,6 +257,7 @@ static void processLine(const String& line) {
         return;
       }
       if (pl.type == TL_SPEED) {
+        actuatorSetStepRateHz((uint32_t)pl.f1);
         g_rsm.setError("none");
         return;
       }
@@ -304,10 +314,12 @@ static void enforceHostActivityTimeout(uint32_t nowMs) {
 void setup() {
   Serial.begin(SERIAL_BAUD);
   g_lineBuf.reserve(MAX_LINE);
+  actuatorInit();
   g_rsm.begin();
   resetQueue();
   g_batchReceiving = false;
   g_lastHostActivityMs = millis();
+  (void)BOARD_TARGET_NOTE;
 }
 
 void loop() {

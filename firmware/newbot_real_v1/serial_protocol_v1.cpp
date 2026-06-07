@@ -317,12 +317,22 @@ void serial_protocol_v1_write_err(const char* reason) {
 void serial_protocol_v1_write_status(const char* stateToken,
                                       const char* errorToken,
                                       uint16_t queued) {
+  serial_protocol_v1_write_status_ex(stateToken, errorToken, queued, nullptr);
+}
+
+void serial_protocol_v1_write_status_ex(const char* stateToken,
+                                         const char* errorToken,
+                                         uint16_t queued,
+                                         const char* actuatorFields) {
   Serial.print("STATUS state=");
   Serial.print(stateToken ? stateToken : "IDLE");
   Serial.print(" fw=newbot_real_v1 motion=stub error=");
   Serial.print(errorToken ? errorToken : "none");
   Serial.print(" queued=");
   Serial.print(queued);
+  if (actuatorFields && actuatorFields[0] != '\0') {
+    Serial.print(actuatorFields);
+  }
   Serial.println();
 }
 

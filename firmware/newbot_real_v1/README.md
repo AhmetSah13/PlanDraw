@@ -2,6 +2,28 @@
 
 Bu klasör, mevcut `newbot_loopback_v1` akışını bozmadan **gerçek donanıma geçiş öncesi** minimum bir kart yazılımı iskeleti sağlar.
 
+## Donanım modeli (Patch 4A)
+
+| Bileşen | Planlanan |
+|---------|-----------|
+| Kontrol kartı | ESP32-S3 DevKitC-1 N16R8 |
+| Hareket | 2× NEMA17 step motor |
+| Sürücü | 2× TMC2208 (STEP/DIR/EN; UART config yok) |
+| Kalem | 1× servo (yukarı/aşağı) |
+
+Pinler ve servo açıları **henüz kesin değil** — `robot_config.h` içinde `PIN_UNASSIGNED` (-1) placeholder kullanılır.
+
+## Actuator abstraction (Patch 4A)
+
+- `robot_config.h` — kart/motor/servo/safety sabitleri
+- `actuator_safe.cpp` — config odaklı, **varsayılan disabled** actuator katmanı
+- Pin atanmadıysa STEP/DIR/EN/servo **fiziksel çıkış üretmez**
+- `REQUIRE_EXPLICIT_ACTUATOR_ENABLE` — motor enable açık onay gerektirir
+- `SAFE_BOOT_PEN_UP` / `SAFE_BOOT_MOTORS_DISABLED` — boot güvenliği
+- `hardStop` / `STOP` yolu `actuatorHardStop()` ile motor disable + pen up
+
+Servo gerçek sürüşü (attach/PWM) Patch 4B; şu an yalnızca arayüz ve güvenli mantıksal durum.
+
 ## Amaç
 
 - `STATUS`, `STOP`, `HOME`, `MOVE` komutlarını parse etmek
@@ -15,12 +37,13 @@ Bu klasör, mevcut `newbot_loopback_v1` akışını bozmadan **gerçek donanıma
 
 > Not: Donanım gelmeden fiziksel doğrulama yapılmış sayılmaz. Bu klasör yalnızca yazılım tarafı hazırlığıdır.
 
-## Kapsam dışı (bu sürümde yok)
+## Kapsam dışı (Patch 4A)
 
-- Gerçek motor sürüşü (PWM/step-dir), enkoder, PID, odometri
-- Gerçek kalem aktüatörü (servo) sürüşü
-- Gercek motor/servo uzerinde fiziksel dogrulama
-- Sürekli telemetri/streaming
+- Gerçek pin mapping (Patch 4B)
+- Fiziksel motor/servo testi
+- TMC2208 UART ayarı
+- Enkoder, PID, odometri
+- Motion planner ile gerçek step üretimi bağlantısı (Patch 4B/5)
 
 ## Desteklenen komutlar (wire girişi)
 
@@ -37,7 +60,7 @@ Bu klasör, mevcut `newbot_loopback_v1` akışını bozmadan **gerçek donanıma
 ## Yanıt formatı (wire çıkışı)
 
 Wire yanıt sözleşmesi:
-- `STATUS state=<STATE> fw=newbot_real_v1 motion=stub error=<ERR> queued=<N>`
+- `STATUS state=<STATE> fw=newbot_real_v1 motion=stub error=<ERR> queued=<N> actuator=... motors=... pen=... left_pin=... right_pin=... pen_pin=...`
 - Başarı: `DONE`
 - Hata: `ERR <reason>`
 
@@ -78,6 +101,15 @@ Patch 2 note:
 Eski Patch 1 limitasyonu (Patch 2 notu guncel davranistir):
 - Batch içinde **tek** motion komutu güvenli kabul edilir.
 - Batch içinde ikinci motion komutu şu an desteklenmez: **`ERR busy`**.
+
+## Donanım geldiğinde yapılacaklar (Patch 4B öncesi checklist)
+
+1. `robot_config.h` — sol/sağ STEP, DIR, EN pinlerini gir
+2. `robot_config.h` — `PEN_SERVO_PIN` ve kalibre `PEN_UP_ANGLE` / `PEN_DOWN_ANGLE`
+3. `firmware/BUILD.md` — FQBN netleştir, compile + upload
+4. Yerden kesik düşük hız step testi (off-ground)
+5. `STOP` ve `hardStop` saha doğrulaması
+6. `docs/HARDWARE_PREP_SERIAL_SMOKE.md` — serial smoke modları
 
 ## Donanım geldiğinde ilk test adımları (manuel)
 
