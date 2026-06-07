@@ -4,22 +4,31 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"DM Sans"', "system-ui", "sans-serif"],
+        sans: ['"Space Grotesk"', "system-ui", "sans-serif"],
+        mono: ['"JetBrains Mono"', "ui-monospace", "monospace"],
       },
       colors: {
-        surface: {
-          DEFAULT: "#F5F7FA",
-          card: "#FFFFFF",
-          muted: "#E8EDF3",
-        },
-        brand: {
-          DEFAULT: "#0B6E99",
-          light: "#38BDF8",
-          dark: "#0C4A6E",
+        command: {
+          bg: "#050816",
+          surface: "#07111F",
+          panel: "rgba(11, 16, 32, 0.72)",
+          border: "rgba(34, 211, 238, 0.18)",
+          glow: "#22D3EE",
+          accent: "#38BDF8",
+          violet: "#6366F1",
         },
       },
       boxShadow: {
-        card: "0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.04)",
+        glow: "0 0 24px rgba(34, 211, 238, 0.15), 0 0 48px rgba(99, 102, 241, 0.08)",
+        "glow-sm": "0 0 12px rgba(34, 211, 238, 0.2)",
+        panel: "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 32px rgba(0,0,0,0.4)",
+      },
+      backgroundImage: {
+        "grid-pattern":
+          "linear-gradient(rgba(34,211,238,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.04) 1px, transparent 1px)",
+      },
+      backgroundSize: {
+        grid: "32px 32px",
       },
     },
   },
