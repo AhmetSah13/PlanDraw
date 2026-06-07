@@ -1,5 +1,7 @@
 # Hardware Prep Serial Responder
 
+Tam smoke prosedürü (socket vs COM vs firmware ayrımı): `docs/HARDWARE_PREP_SERIAL_SMOKE.md`
+
 ## Purpose
 
 This document explains the development-only serial responder prepared for PlanDraw / NewBot hardware prep Stage 2.

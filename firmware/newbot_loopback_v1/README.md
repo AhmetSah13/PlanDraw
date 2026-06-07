@@ -5,6 +5,7 @@
 ## Kurulum
 
 - **Arduino IDE:** `newbot_loopback_v1` klasörünü sketch olarak açın; kart olarak ESP32 veya Arduino seçin.
+- **arduino-cli:** `firmware/BUILD.md` — FQBN donanım ekibi tarafından netleştirilmeden otomatik build doğrulanmış sayılmaz.
 - **Seri:** 115200 baud (kod içi `SERIAL_BAUD`).
 
 ## Dahili durum (motor yok)

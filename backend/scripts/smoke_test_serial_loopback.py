@@ -111,6 +111,18 @@ def run_stop(port: str, baudrate: int, timeout_s: float) -> int:
         drv.disconnect()
 
 
+def _read_lines_until_err(readline, *, max_lines: int = 10) -> list[bytes]:
+    lines: list[bytes] = []
+    for _ in range(max_lines):
+        raw = readline()
+        if not raw:
+            break
+        lines.append(raw)
+        if raw.startswith(b"ERR"):
+            break
+    return lines
+
+
 def run_malformed(port: str, baudrate: int, timeout_s: float) -> int:
     """
     Geçersiz DSL satırı: SerialDriver yerine ham pyserial (çerçeve hatalı gövde).
@@ -128,9 +140,10 @@ def run_malformed(port: str, baudrate: int, timeout_s: float) -> int:
     ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout_s)
     try:
         ser.write(payload)
-        raw = ser.readline()
-        print("Gelen satır:", raw.decode("utf-8", errors="replace").strip())
-        if raw.startswith(b"ERR"):
+        lines = _read_lines_until_err(ser.readline)
+        for raw in lines:
+            print("Gelen satır:", raw.decode("utf-8", errors="replace").strip())
+        if any(raw.startswith(b"ERR") for raw in lines):
             print("Sonuç: BAŞARILI (MCU ERR beklenen)")
             return 0
         print("Sonuç: BEKLENMEDİ (ERR yok)")
@@ -221,13 +234,20 @@ def run_socket_stop(host: str, port: int, timeout_s: float) -> int:
         drv.disconnect()
 
 
-def _socket_roundtrip(host: str, port: int, timeout_s: float, payload: bytes) -> bytes:
+def _socket_roundtrip_lines(
+    host: str,
+    port: int,
+    timeout_s: float,
+    payload: bytes,
+    *,
+    max_lines: int = 10,
+) -> list[bytes]:
     with socket.create_connection((host, port), timeout=timeout_s) as sock:
         sock.settimeout(timeout_s)
         sock.sendall(payload)
         reader = sock.makefile("rb")
         try:
-            return reader.readline()
+            return _read_lines_until_err(reader.readline, max_lines=max_lines)
         finally:
             reader.close()
 
@@ -237,9 +257,10 @@ def run_socket_malformed(host: str, port: int, timeout_s: float) -> int:
     payload = b"BEGIN\nMOVE\nEND\n"
     print("Gonderilen (bytes):", payload)
     try:
-        raw = _socket_roundtrip(host, port, timeout_s, payload)
-        print("Gelen satir:", raw.decode("utf-8", errors="replace").strip())
-        if raw.startswith(b"ERR"):
+        lines = _socket_roundtrip_lines(host, port, timeout_s, payload)
+        for raw in lines:
+            print("Gelen satir:", raw.decode("utf-8", errors="replace").strip())
+        if any(raw.startswith(b"ERR") for raw in lines):
             print("Sonuc: BASARILI (responder ERR beklenen)")
             return 0
         print("Sonuc: BEKLENMEDI (ERR yok)")

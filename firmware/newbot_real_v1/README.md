@@ -97,6 +97,8 @@ Bu adımlar fiziksel kart olmadan doğrulanmış sayılmaz; kart geldiğinde uyg
 - `python scripts/smoke_test_serial_loopback.py <PORT> --mode malformed`
 
 İlgili belgeler:
+- `firmware/BUILD.md` — arduino-cli compile/upload (FQBN placeholder; hedef kart netleştirilmeli)
+- `docs/HARDWARE_PREP_SERIAL_SMOKE.md` — serial/socket smoke prosedürü
 - `docs/SERIAL_PROTOCOL_V1.md`
 - `docs/FIRMWARE_ARCHITECTURE_V1.md`
 - `docs/BRINGUP_STAGE_0_1_CHECKLIST.md`
