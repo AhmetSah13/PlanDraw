@@ -1,4 +1,4 @@
-import { Activity, Cable, Cpu, Pen, Shield, Unplug, Wifi } from "lucide-react";
+import { Activity, Cable, Cpu, Pen, Shield, Unplug, Wifi, Zap } from "lucide-react";
 import { tr } from "../content/tr";
 import { cn } from "../lib/cn";
 import { GlowCard } from "./GlowCard";
@@ -43,6 +43,12 @@ export function TelemetryPanel({
   serialMode,
   lastRobotStatus,
 }: TelemetryPanelProps) {
+  const penSafeValue = !penSafeKnown
+    ? tr.telemetry.penSafePending
+    : penSafe
+      ? tr.telemetry.penSafeActive
+      : tr.telemetry.penSafeInactive;
+
   const rows: TelemetryRow[] = [
     {
       icon: Wifi,
@@ -53,8 +59,14 @@ export function TelemetryPanel({
     {
       icon: Cpu,
       label: tr.telemetry.firmware,
-      value: tr.telemetry.waiting,
-      tone: "waiting",
+      value: tr.telemetry.firmwarePass,
+      tone: "verified",
+    },
+    {
+      icon: Shield,
+      label: tr.telemetry.penSafe,
+      value: penSafeValue,
+      tone: penSafeKnown && penSafe ? "verified" : "waiting",
     },
     {
       icon: Cable,
@@ -63,26 +75,22 @@ export function TelemetryPanel({
       tone: serialMode === "live" ? "ready" : serialMode ? "waiting" : "unknown",
     },
     {
-      icon: Shield,
-      label: tr.telemetry.penSafe,
-      value: !penSafeKnown
-        ? tr.telemetry.unverified
-        : penSafe
-          ? tr.telemetry.verified
-          : tr.telemetry.unverified,
-      tone: penSafeKnown && penSafe ? "verified" : "waiting",
+      icon: Unplug,
+      label: tr.telemetry.motors,
+      value: tr.telemetry.motorsWaiting,
+      tone: "waiting",
+    },
+    {
+      icon: Zap,
+      label: tr.telemetry.liveMode,
+      value: tr.telemetry.liveRequiresHardware,
+      tone: "waiting",
     },
     {
       icon: Activity,
       label: tr.telemetry.stopReady,
       value: tr.telemetry.ready,
       tone: "ready",
-    },
-    {
-      icon: Unplug,
-      label: tr.telemetry.motors,
-      value: tr.telemetry.disabled,
-      tone: "disabled",
     },
     {
       icon: Pen,
@@ -96,6 +104,7 @@ export function TelemetryPanel({
 
   return (
     <GlowCard title={tr.telemetry.title} className="h-full">
+      <p className="mb-3 text-[10px] leading-relaxed text-slate-600">{tr.telemetry.demoNote}</p>
       <ul className="space-y-3">
         {rows.map((row) => (
           <li
@@ -106,7 +115,9 @@ export function TelemetryPanel({
               <row.icon className="h-4 w-4 text-cyan-600/70" />
               <span className="text-xs text-slate-400">{row.label}</span>
             </div>
-            <span className={cn("text-xs font-semibold", toneClass(row.tone))}>{row.value}</span>
+            <span className={cn("text-right text-xs font-semibold", toneClass(row.tone))}>
+              {row.value}
+            </span>
           </li>
         ))}
       </ul>

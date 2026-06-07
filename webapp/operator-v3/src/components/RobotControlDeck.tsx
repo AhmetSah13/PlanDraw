@@ -9,6 +9,8 @@ import {
   Upload,
 } from "lucide-react";
 import { tr } from "../content/tr";
+import type { ActionFeedback } from "../lib/workflowState";
+import { ActionFeedbackCard } from "./ActionFeedbackCard";
 import { GlowCard } from "./GlowCard";
 
 interface RobotControlDeckProps {
@@ -16,6 +18,7 @@ interface RobotControlDeckProps {
   busy: boolean;
   simulationActive: boolean;
   selectedFileName: string | null;
+  actionFeedback: ActionFeedback | null;
   onFileSelect: (file: File) => void;
   onCompile: () => void;
   onDryRun: () => void;
@@ -30,6 +33,7 @@ export function RobotControlDeck({
   busy,
   simulationActive,
   selectedFileName,
+  actionFeedback,
   onFileSelect,
   onCompile,
   onDryRun,
@@ -55,6 +59,7 @@ export function RobotControlDeck({
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) onFileSelect(f);
+            e.target.value = "";
           }}
         />
       </label>
@@ -85,6 +90,11 @@ export function RobotControlDeck({
           {tr.control.live}
         </button>
       </div>
+
+      <p className="mt-2 text-[11px] leading-snug text-slate-500">{tr.control.dryRunHint}</p>
+      <p className="mt-1 text-[11px] leading-snug text-slate-600">{tr.control.simulateHint}</p>
+
+      <ActionFeedbackCard feedback={actionFeedback} />
 
       {!hasCommands ? (
         <p className="mt-3 text-xs text-slate-600">{tr.control.needsPlan}</p>

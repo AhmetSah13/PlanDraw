@@ -52,13 +52,20 @@ export const tr = {
     points: "Nokta",
   },
   telemetry: {
-    title: "Robot Telemetrisi",
+    title: "Sistem Durumu",
     backend: "Backend",
-    firmware: "Firmware",
+    firmware: "Firmware compile",
+    firmwarePass: "PASS",
     serial: "Serial",
-    penSafe: "Pen-safe",
+    penSafe: "Pen-safe compile",
+    penSafeActive: "Aktif",
+    penSafeInactive: "Pasif",
+    penSafePending: "Plan bekleniyor",
     stopReady: "STOP",
     motors: "Motor çıkışları",
+    motorsWaiting: "Donanım testi bekliyor",
+    liveMode: "Canlı mod",
+    liveRequiresHardware: "Fiziksel test gerektirir",
     pen: "Kalem",
     unknown: "Bilinmiyor",
     waiting: "Bekleniyor",
@@ -72,7 +79,23 @@ export const tr = {
     unverified: "Doğrulanmadı",
     penUp: "Yukarı",
     penDown: "Aşağı",
-    motorNote: "Donanım doğrulaması yapılana kadar devre dışıdır.",
+    motorNote:
+      "Motor/servo fiziksel testi yapılmadı. Demo akışı dry-run ve simülasyon ile gösterilir.",
+    demoNote: "Jüri demosu: donanım bağlı değilken yazılım hattı doğrulanır.",
+  },
+  demo: {
+    title: "Demo Akışı",
+    hint: "DXF yükle → analiz/derle → komut akışı → dry-run veya simülasyon",
+    steps: {
+      upload: "DXF yükle",
+      compile: "Analiz / Derle",
+      stream: "Komut akışı",
+      run: "Dry-run / Simülasyon",
+    },
+    samplesTitle: "Hazır demo planları",
+    samplesHint: "Tek tıkla yükle ve derle — backend açık olmalıdır.",
+    loadCompile: "Yükle ve derle",
+    loading: "Demo yükleniyor…",
   },
   stream: {
     title: "Komut Akışı",
@@ -82,8 +105,12 @@ export const tr = {
   control: {
     title: "Güvenlik Katmanı",
     compile: "Planı Derle",
-    dryRun: "Dry-run Çalıştır",
+    dryRun: "Komutları Test Et (Dry-run)",
+    dryRunHint:
+      "Robot hareket etmez; üretilen komutlar ve güvenli gönderim akışı test edilir.",
     simulate: "Simülasyonu Başlat",
+    simulateHint:
+      "Bu adım çizim komutlarını simülasyon işine gönderir. Canlı animasyon henüz bağlı değildir.",
     live: "Canlı Robota Gönder",
     stop: "Robotu Durdur (Canlı STOP)",
     stopNote: "Yazılımsal STOP komutudur. Fiziksel acil stop'un yerini tutmaz.",
@@ -98,6 +125,8 @@ export const tr = {
     cancel: "İptal",
     busy: "İşlem sürüyor…",
     needsPlan: "Önce plan yükleyin ve derleyin.",
+    needsBackend: "Backend bağlantısı yok.",
+    dryRunNoCommands: "Komut yok — önce planı derleyin.",
   },
   safety: {
     banner:
