@@ -39,7 +39,8 @@ from app.analysis.geometry_graph import enrich_plan_with_graph_metrics
 from app.execution.executor import CommandExecutor
 from app.core.plan_module import load_plan_from_string
 from app.pathing.path_generator import PathGenerator
-from app.execution.compiler import compile_path_to_commands
+from app.execution.compiler import compile_segments_pen_safe
+from app.execution.pen_safe_validator import PenSafeValidationError, validate_pen_safe_commands
 from app.pathing.path_optimizer import OptimizeConfig
 
 from app.normalization.normalized_plan import import_plan_from_json
@@ -672,7 +673,9 @@ def import_plan(req: NormalizedPlanIn) -> ImportPlanResponse:
             plan_text_out = normalized_to_plan_text(normalized)
         if return_commands_text or return_raw_path:
             plan = normalized_to_plan(normalized)
-            raw_path = PathGenerator(plan, step_size=step_size).generate_path()
+            path_gen = PathGenerator(plan, step_size=step_size)
+            path_segments = path_gen.generate_path_segments()
+            raw_path = path_gen.generate_path()
             if not raw_path:
                 return ImportPlanResponse(
                     ok=False,
@@ -683,7 +686,15 @@ def import_plan(req: NormalizedPlanIn) -> ImportPlanResponse:
             if return_raw_path:
                 raw_path_points_out = [[float(x), float(y)] for x, y in raw_path]
             if return_commands_text:
-                commands = compile_path_to_commands(raw_path, speed=speed)
+                try:
+                    commands = compile_segments_pen_safe(path_segments, speed=speed)
+                except PenSafeValidationError as e:
+                    return ImportPlanResponse(
+                        ok=False,
+                        error=str(e),
+                        normalized=None,
+                        warnings=warnings,
+                    )
                 commands_text_out = serialize_commands(commands)
 
         return ImportPlanResponse(
@@ -908,7 +919,9 @@ def import_dxf(
         plan_text_out = normalized_to_plan_text(normalized)
     if options.return_commands_text or options.return_raw_path:
         plan = normalized_to_plan(normalized)
-        raw_path = PathGenerator(plan, step_size=step_size).generate_path()
+        path_gen = PathGenerator(plan, step_size=step_size)
+        path_segments = path_gen.generate_path_segments()
+        raw_path = path_gen.generate_path()
         if not raw_path:
             return ImportDxfResponse(
                 ok=False,
@@ -919,7 +932,15 @@ def import_dxf(
         if options.return_raw_path:
             raw_path_points_out = [[float(x), float(y)] for x, y in raw_path]
         if options.return_commands_text:
-            commands = compile_path_to_commands(raw_path, speed=speed)
+            try:
+                commands = compile_segments_pen_safe(path_segments, speed=speed)
+            except PenSafeValidationError as e:
+                return ImportDxfResponse(
+                    ok=False,
+                    error=str(e),
+                    normalized=None,
+                    warnings=warnings,
+                )
             commands_text_out = serialize_commands(commands)
 
     return ImportDxfResponse(
@@ -1137,7 +1158,9 @@ def import_dwg(
         plan_text_out = normalized_to_plan_text(normalized)
     if options.return_commands_text or options.return_raw_path:
         plan = normalized_to_plan(normalized)
-        raw_path = PathGenerator(plan, step_size=step_size).generate_path()
+        path_gen = PathGenerator(plan, step_size=step_size)
+        path_segments = path_gen.generate_path_segments()
+        raw_path = path_gen.generate_path()
         if not raw_path:
             return ImportDxfResponse(
                 ok=False,
@@ -1148,7 +1171,15 @@ def import_dwg(
         if options.return_raw_path:
             raw_path_points_out = [[float(x), float(y)] for x, y in raw_path]
         if options.return_commands_text:
-            commands = compile_path_to_commands(raw_path, speed=speed)
+            try:
+                commands = compile_segments_pen_safe(path_segments, speed=speed)
+            except PenSafeValidationError as e:
+                return ImportDxfResponse(
+                    ok=False,
+                    error=str(e),
+                    normalized=None,
+                    warnings=warnings,
+                )
             commands_text_out = serialize_commands(commands)
 
     # Toplam segment uzunluğu (önerilen step_size için)
@@ -1739,6 +1770,7 @@ def compile_plan(req: CompilePlanRequest):
     ox, oy = (0.0, 0.0) if req.world_offset is None else (float(req.world_offset[0]), float(req.world_offset[1]))
 
     path_gen = PathGenerator(plan, step_size=step_size)
+    path_segments = path_gen.generate_path_segments()
     raw_path = path_gen.generate_path()
     if not raw_path:
         return JSONResponse(
@@ -1755,13 +1787,31 @@ def compile_plan(req: CompilePlanRequest):
             },
         )
     world_path: List[Tuple[float, float]] = [(x * scale + ox, y * scale + oy) for x, y in raw_path]
+    world_segments: List[List[Tuple[float, float]]] = [
+        [(x * scale + ox, y * scale + oy) for x, y in seg] for seg in path_segments
+    ]
     walls_world: List[List[float]] = [
         [w.x1 * scale + ox, w.y1 * scale + oy, w.x2 * scale + ox, w.y2 * scale + oy]
         for w in plan.walls
     ]
 
-    # Kaynak gerçeği: derleyici çıktısı; isteğe bağlı tek optimize sonrası ``working``.
-    commands_raw = compile_path_to_commands(world_path, speed=speed)
+    # Kaynak gerçeği: stroke-aware pen-safe derleyici; isteğe bağlı tek optimize sonrası ``working``.
+    try:
+        commands_raw = compile_segments_pen_safe(world_segments, speed=speed)
+    except PenSafeValidationError as e:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": False,
+                "error": str(e),
+                "commands_text": "",
+                "raw_path_points": world_path,
+                "walls": walls_world,
+                "stats": StatsOut().model_dump(),
+                "parser_diags": [],
+                "analysis_diags": [],
+            },
+        )
     commands_text_raw = serialize_commands(commands_raw)
     start_pt = (0.0, 0.0)
     optimize_cfg = _optimize_cfg_from_request(getattr(req, "optimize", None))
@@ -1771,7 +1821,12 @@ def compile_plan(req: CompilePlanRequest):
         optimize_cfg=optimize_cfg,
     )
     if optimize_cfg is not None and getattr(optimize_cfg, "enabled", False):
-        commands_text_optimized = serialize_commands(working)
+        try:
+            validate_pen_safe_commands(working, start_pos=start_pt)
+            commands_text_optimized = serialize_commands(working)
+        except PenSafeValidationError:
+            working = commands_raw
+            commands_text_optimized = commands_text_raw
     else:
         commands_text_optimized = commands_text_raw
 

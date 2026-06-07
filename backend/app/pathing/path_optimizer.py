@@ -122,7 +122,11 @@ def commands_to_polyline_segments(
             current.wait_after_point.append(0.0)
             continue
         if isinstance(cmd, MoveCommand):
-            x, y = float(cmd.x), float(cmd.y)
+            nx, ny = float(cmd.x), float(cmd.y)
+            if current.pen_down and not current.points:
+                current.points.append((x, y))
+                current.wait_after_point.append(0.0)
+            x, y = nx, ny
             current.points.append((x, y))
             current.wait_after_point.append(0.0)
             continue
@@ -267,6 +271,8 @@ def segments_to_commands(segments: List[Segment]) -> List[Command]:
             w = waits[i] if i < len(waits) else 0.0
             if w > 0.0:
                 out.append(WaitCommand(seconds=w))
+    if last_pen is True:
+        out.append(PenCommand(is_down=False))
     return out
 
 
@@ -449,9 +455,15 @@ def optimize_commands(
     for seg_pts in joined:
         if not seg_pts:
             continue
-        if prev_end is not None:
+        travel_from = prev_end if prev_end is not None else start
+        if _dist(travel_from, seg_pts[0]) > 1e-9:
             new_segments_list.append(
-                Segment(pen_down=False, points=[prev_end, seg_pts[0]], speed=speed, wait_after_point=[0.0, 0.0])
+                Segment(
+                    pen_down=False,
+                    points=[travel_from, seg_pts[0]],
+                    speed=speed,
+                    wait_after_point=[0.0, 0.0],
+                )
             )
         new_segments_list.append(
             Segment(pen_down=True, points=seg_pts, speed=speed, wait_after_point=[0.0] * len(seg_pts))
