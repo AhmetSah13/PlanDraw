@@ -24,9 +24,10 @@ import {
   stopLiveSerial,
   stopSimulationJob,
 } from "./services/api";
-import { loadDemoPlan, type DemoPlanId } from "./services/demoPlans";
+import { getDemoPlanMeta, loadDemoPlan, type DemoPlanId } from "./services/demoPlans";
 import type { AnalyzeResponse } from "./types/api";
 import {
+  buildSimulationPreview,
   buildSimulationSegments,
   createIdlePlayback,
   startPlayback,
@@ -49,15 +50,13 @@ import {
   pipelineAfterCompile,
   pipelineAfterDerivedReset,
 } from "./lib/workflowState";
-
-const SECTION_IDS: Record<MissionSection, string> = {
-  sistem: "section-sistem",
-  plan: "section-plan",
-  derleme: "section-derleme",
-  simulasyon: "section-simulasyon",
-  robot: "section-robot",
-  loglar: "section-loglar",
-};
+import {
+  buildWorkflowAvailability,
+  getPostCompileNavigation,
+  resetDerivedPipelineForAction,
+  SECTION_IDS,
+  type CompileSource,
+} from "./lib/operatorFlow";
 
 function formatTime(d: Date) {
   return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -86,6 +85,7 @@ export default function App() {
   const [serialMode, setSerialMode] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [simPlayback, setSimPlayback] = useState<SimPlayback>(createIdlePlayback);
+  const [dryRunPassed, setDryRunPassed] = useState(false);
 
   const sectionRefs = useRef<Partial<Record<MissionSection, HTMLElement | null>>>({});
   const simRunCounter = useRef(0);
@@ -95,6 +95,34 @@ export default function App() {
   const strokeCount = useMemo(
     () => (commandsText ? countStrokes(commandsText) : 0),
     [commandsText],
+  );
+
+  const workflowAvailability = useMemo(
+    () =>
+      buildWorkflowAvailability({
+        backendOnline,
+        busy,
+        hasSelectedFile: Boolean(selectedFile),
+        hasCommands: Boolean(commandsText.trim()),
+        compileStatus: pipeline.compile,
+        simulationStatus: pipeline.simulate,
+        dryRunPassed,
+        preflight,
+        penSafeKnown,
+        penSafe,
+      }),
+    [
+      backendOnline,
+      busy,
+      selectedFile,
+      commandsText,
+      pipeline.compile,
+      pipeline.simulate,
+      dryRunPassed,
+      preflight,
+      penSafeKnown,
+      penSafe,
+    ],
   );
 
   const pushLog = useCallback((line: string) => {
@@ -127,6 +155,7 @@ export default function App() {
     setRobotLabel(tr.telemetry.unknown);
     setActionFeedback(patch.actionFeedback);
     setSimPlayback(createIdlePlayback());
+    setDryRunPassed(false);
     setActivityLog(patch.activityLog);
     setLastUpdate(formatTime(new Date()));
   }, []);
@@ -176,7 +205,7 @@ export default function App() {
     setSelectedFile(file);
   }
 
-  async function compileFile(file: File) {
+  async function compileFile(file: File, source: CompileSource) {
     const session = planSessionRef.current;
 
     if (!backendOnline) {
@@ -196,6 +225,7 @@ export default function App() {
     setActiveMode("idle");
     setRobotLabel(tr.telemetry.unknown);
     setPipeline(pipelineAfterDerivedReset());
+    setDryRunPassed(false);
 
     pushLog(formatActivityLog("INFO", `Plan yükleniyor: ${file.name}`));
 
@@ -228,7 +258,8 @@ export default function App() {
         ? formatActivityLog("OK", "Pen-safe compile tamamlandı")
         : formatActivityLog("ERR", "Derleme tamamlandı — pen-safe kontrol edin"),
     );
-    navigate("loglar");
+    const target = getPostCompileNavigation(source);
+    if (target) navigate(target);
   }
 
   async function handleCompile() {
@@ -236,7 +267,7 @@ export default function App() {
     const session = planSessionRef.current;
     setBusy(true);
     try {
-      await compileFile(selectedFile);
+      await compileFile(selectedFile, "manual");
     } catch (e) {
       if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
@@ -257,11 +288,15 @@ export default function App() {
     setBusy(true);
     let session = planSessionRef.current;
     try {
-      const file = await loadDemoPlan(id);
-      resetPlanWorkflow(file.name);
+      const meta = getDemoPlanMeta(id);
+      resetPlanWorkflow(meta.file);
+      setSelectedFile(null);
       session = planSessionRef.current;
+      setBusy(true);
+      const file = await loadDemoPlan(id);
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       setSelectedFile(file);
-      await compileFile(file);
+      await compileFile(file, "demo");
     } catch (e) {
       if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       setPipeline((prev) => ({ ...prev, upload: "error" }));
@@ -274,6 +309,13 @@ export default function App() {
   }
 
   async function runDryRun() {
+    if (!workflowAvailability.canDryRun) {
+      const msg = workflowAvailability.dryRunReason ?? tr.control.dryRunNoCommands;
+      setActionFeedback(buildDryRunFeedback("error", undefined, msg));
+      pushLog(formatActivityLog("ERR", msg));
+      navigate("derleme");
+      return;
+    }
     if (!commandsText.trim()) {
       setActionFeedback(buildDryRunFeedback("error", undefined, tr.control.dryRunNoCommands));
       pushLog(formatActivityLog("ERR", tr.control.dryRunNoCommands));
@@ -291,6 +333,8 @@ export default function App() {
     setBusy(true);
     setActiveMode("dryRun");
     setActionFeedback(buildDryRunFeedback("running"));
+    setDryRunPassed(false);
+    setPipeline((prev) => resetDerivedPipelineForAction(prev, "dryRun"));
     pushLog(formatActivityLog("DRY", "Dry-run başlatıldı"));
 
     try {
@@ -305,10 +349,12 @@ export default function App() {
         setRobotLabel(res.status);
         setSerialMode("dry_run");
         setActionFeedback(buildDryRunFeedback("success", res));
+        setDryRunPassed(true);
         pushLog(formatDryRunLog(true, res.message));
       } else {
         const msg = res.message || res.error_detail || "Dry-run başarısız";
         setActionFeedback(buildDryRunFeedback("error", res, msg));
+        setDryRunPassed(false);
         pushLog(formatActivityLog("ERR", `Dry-run başarısız: ${msg}`));
       }
       scrollToLogs();
@@ -316,6 +362,7 @@ export default function App() {
       if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
       setActionFeedback(buildDryRunFeedback("error", undefined, msg));
+      setDryRunPassed(false);
       pushLog(formatActivityLog("ERR", `Dry-run başarısız: ${msg}`));
       scrollToLogs();
     } finally {
@@ -326,6 +373,13 @@ export default function App() {
   }
 
   async function runSimulate() {
+    if (!workflowAvailability.canSimulate) {
+      const msg = workflowAvailability.simulateReason ?? tr.control.dryRunNoCommands;
+      setActionFeedback(buildSimFeedback("error", undefined, msg));
+      pushLog(formatActivityLog("ERR", msg));
+      navigate("robot");
+      return;
+    }
     if (!commandsText.trim()) {
       setActionFeedback(buildSimFeedback("error", undefined, tr.control.dryRunNoCommands));
       pushLog(formatActivityLog("ERR", tr.control.dryRunNoCommands));
@@ -343,6 +397,7 @@ export default function App() {
     setBusy(true);
     setActiveMode("simulation");
     setStep("simulate", "ready");
+    setPipeline((prev) => resetDerivedPipelineForAction(prev, "simulate"));
     setActionFeedback(buildSimFeedback("running"));
     pushLog(formatActivityLog("SIM", "Simülasyon işi oluşturuluyor"));
 
@@ -360,8 +415,100 @@ export default function App() {
       playbackSessionRef.current = planSessionRef.current;
       const segs = buildSimulationSegments(commandsText, pathPoints);
       setSimPlayback(startPlayback(simRunCounter.current, segs));
-      navigate("plan");
+      navigate("simulasyon");
+    } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+      const msg = formatUserError(e);
+      setStep("simulate", "error");
+      setActionFeedback(buildSimFeedback("error", undefined, msg));
+      pushLog(formatActivityLog("ERR", `Simülasyon başlatılamadı: ${msg}`));
       scrollToLogs();
+    } finally {
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
+    }
+  }
+
+  async function runSimulatePreview() {
+    if (!workflowAvailability.canSimulate) {
+      const msg = workflowAvailability.simulateReason ?? tr.control.dryRunNoCommands;
+      setActionFeedback(buildSimFeedback("error", undefined, msg));
+      pushLog(formatActivityLog("ERR", msg));
+      navigate("robot");
+      return;
+    }
+    if (!commandsText.trim()) {
+      const msg = "Simülasyon için önce planı derleyin.";
+      setActionFeedback(buildSimFeedback("error", undefined, msg));
+      pushLog(formatActivityLog("ERR", msg));
+      scrollToLogs();
+      return;
+    }
+
+    const session = planSessionRef.current;
+    setBusy(true);
+    setActiveMode("simulation");
+    setStep("simulate", "ready");
+    setPipeline((prev) => resetDerivedPipelineForAction(prev, "simulate"));
+    setActionFeedback(buildSimFeedback("running"));
+    pushLog(formatActivityLog("SIM", "Simülasyon önizlemesi hazırlanıyor"));
+
+    try {
+      const preview = buildSimulationPreview(commandsText, pathPoints);
+      if (!preview.segments.length) {
+        const msg = preview.error ?? "Simülasyon için çizilebilir segment bulunamadı.";
+        setStep("simulate", "error");
+        setActionFeedback(buildSimFeedback("error", undefined, msg));
+        pushLog(formatActivityLog("ERR", msg));
+        navigate("robot");
+        return;
+      }
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+
+      let jobId: string | null = null;
+      if (backendOnline) {
+        try {
+          const job = await createSimulationJob(commandsText, walls);
+          if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+          jobId = job.job_id;
+          pushLog(formatSimLog(job.job_id));
+          pushLog(formatActivityLog("OK", tr.control.simJobCreated));
+        } catch (e) {
+          if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+          pushLog(
+            formatActivityLog(
+              "ERR",
+              `Backend simülasyon işi oluşturulamadı; yerel önizleme başlatıldı. ${formatUserError(e)}`,
+            ),
+          );
+        }
+      } else {
+        pushLog(formatActivityLog("ERR", "Backend bağlantısı yok; yerel simülasyon önizlemesi başlatıldı."));
+      }
+
+      setSimJobId(jobId);
+      setStep("simulate", "success");
+      setRobotLabel(jobId ? `Sim: ${jobId.slice(0, 8)}` : "Yerel önizleme");
+      setActionFeedback({
+        kind: "simulate",
+        phase: "success",
+        title: "Simülasyon önizlemesi başlatıldı",
+        message: jobId
+          ? `Backend simülasyon işi oluşturuldu: job_id=${jobId}`
+          : "Backend simülasyon işi olmadan yerel önizleme başlatıldı.",
+        detail:
+          preview.source === "commands"
+            ? "Görsel önizleme komutlardan oluşturuldu; gerçek motor/zemin davranışını temsil etmez."
+            : "Görsel önizleme path verisinden oluşturuldu; gerçek motor/zemin davranışını temsil etmez.",
+      });
+      for (const warning of preview.warnings.slice(0, 3)) {
+        pushLog(formatActivityLog("INFO", `Simülasyon uyarısı satır ${warning.line}: ${warning.message}`));
+      }
+      simRunCounter.current += 1;
+      playbackSessionRef.current = planSessionRef.current;
+      setSimPlayback(startPlayback(simRunCounter.current, preview.segments));
+      navigate("simulasyon");
     } catch (e) {
       if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       const msg = formatUserError(e);
@@ -377,6 +524,13 @@ export default function App() {
   }
 
   async function runLive() {
+    if (!workflowAvailability.canLive) {
+      const msg = workflowAvailability.liveReason ?? tr.control.dryRunNoCommands;
+      setActionFeedback(buildLiveFeedback("error", undefined, msg));
+      pushLog(formatActivityLog("ERR", msg));
+      navigate("robot");
+      return;
+    }
     if (!commandsText.trim()) {
       pushLog(formatActivityLog("ERR", tr.control.dryRunNoCommands));
       scrollToLogs();
@@ -396,11 +550,16 @@ export default function App() {
     pushLog(formatActivityLog("INFO", "Canlı gönderim başlatıldı"));
 
     try {
-      let pf = preflight;
-      if (!pf) {
-        pf = await analyzeCommands(commandsText, walls);
-        if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
-        setPreflight(pf);
+      const pf = await analyzeCommands(commandsText, walls, "error");
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
+      setPreflight(pf);
+      if (pf.blocked) {
+        setStep("send", "error");
+        const msg = "Final analiz engelli döndü; canlı gönderim iptal edildi.";
+        setActionFeedback(buildLiveFeedback("error", undefined, msg));
+        pushLog(formatActivityLog("ERR", msg));
+        navigate("robot");
+        return;
       }
       const res = await executeSerial(commandsText, {
         dryRun: false,
@@ -433,26 +592,33 @@ export default function App() {
   }
 
   async function runLiveStop() {
+    const session = planSessionRef.current;
     setBusy(true);
     pushLog(formatActivityLog("INFO", "Canlı STOP isteği gönderildi"));
     try {
       const res = await stopLiveSerial();
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       setRobotLabel(res.stopped ? "Durduruldu" : res.status);
       pushLog(formatActivityLog("OK", res.message));
       scrollToLogs();
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       pushLog(formatActivityLog("ERR", formatUserError(e)));
       scrollToLogs();
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
   async function runSimStop() {
     if (!simJobId) return;
+    const session = planSessionRef.current;
     setBusy(true);
     try {
       await stopSimulationJob(simJobId);
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       setSimJobId(null);
       setSimPlayback(createIdlePlayback());
       playbackSessionRef.current = 0;
@@ -463,10 +629,13 @@ export default function App() {
       pushLog(formatActivityLog("OK", "Simülasyon durduruldu"));
       scrollToLogs();
     } catch (e) {
+      if (!isPlanSessionCurrent(session, planSessionRef.current)) return;
       pushLog(formatActivityLog("ERR", formatUserError(e)));
       scrollToLogs();
     } finally {
-      setBusy(false);
+      if (isPlanSessionCurrent(session, planSessionRef.current)) {
+        setBusy(false);
+      }
     }
   }
 
@@ -486,23 +655,24 @@ export default function App() {
       stopBusy={busy}
     >
       <div className="mx-auto max-w-[1600px] space-y-6">
-        <SafetyNotice />
-
-        <DemoWorkflowPanel
-          pipeline={pipeline}
-          hasCommands={Boolean(commandsText)}
-          backendOnline={backendOnline}
-          busy={busy}
-          onDemoSelect={handleDemoSelect}
-        />
-
-        <section id={SECTION_IDS.sistem} ref={bindSection("sistem")} className="scroll-mt-4">
+        <section id={SECTION_IDS.sistem} ref={bindSection("sistem")} className="scroll-mt-4 space-y-6">
+          <SafetyNotice />
           <PipelineStepper statuses={pipeline} busy={busy} />
+        </section>
+
+        <section id={SECTION_IDS.plan} ref={bindSection("plan")} className="scroll-mt-4">
+          <DemoWorkflowPanel
+            pipeline={pipeline}
+            hasCommands={Boolean(commandsText)}
+            backendOnline={backendOnline}
+            busy={busy}
+            onDemoSelect={handleDemoSelect}
+          />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-12">
           <div className="space-y-6 xl:col-span-8">
-            <section id={SECTION_IDS.plan} ref={bindSection("plan")} className="scroll-mt-4">
+            <section id={SECTION_IDS.simulasyon} ref={bindSection("simulasyon")} className="scroll-mt-4">
               <CadPreviewPanel
                 planName={planName}
                 points={pathPoints}
@@ -515,26 +685,34 @@ export default function App() {
               />
             </section>
 
-            <section id={SECTION_IDS.derleme} ref={bindSection("derleme")} className="scroll-mt-4" />
-
-            <section id={SECTION_IDS.robot} ref={bindSection("robot")} className="scroll-mt-4">
+            <section className="scroll-mt-4">
               <RobotControlDeck
                 hasCommands={Boolean(commandsText)}
                 busy={busy}
                 simulationActive={Boolean(simJobId)}
                 selectedFileName={selectedFile?.name ?? null}
                 actionFeedback={actionFeedback}
+                canCompile={workflowAvailability.canCompile}
+                canDryRun={workflowAvailability.canDryRun}
+                canSimulate={workflowAvailability.canSimulate}
+                canLive={workflowAvailability.canLive}
+                compileReason={workflowAvailability.compileReason}
+                dryRunReason={workflowAvailability.dryRunReason}
+                simulateReason={workflowAvailability.simulateReason}
+                liveReason={workflowAvailability.liveReason}
+                compileAnchorId={SECTION_IDS.derleme}
+                robotAnchorId={SECTION_IDS.robot}
+                compileAnchorRef={bindSection("derleme")}
+                robotAnchorRef={bindSection("robot")}
                 onFileSelect={handleFileSelect}
                 onCompile={handleCompile}
                 onDryRun={runDryRun}
-                onSimulate={runSimulate}
+                onSimulate={runSimulatePreview}
                 onLive={runLive}
                 onLiveStop={runLiveStop}
                 onSimStop={runSimStop}
               />
             </section>
-
-            <section id={SECTION_IDS.simulasyon} ref={bindSection("simulasyon")} className="scroll-mt-4" />
 
             <section id={SECTION_IDS.loglar} ref={bindSection("loglar")} className="scroll-mt-4">
               <CommandStream commandsText={commandsText} activityLog={activityLog} />

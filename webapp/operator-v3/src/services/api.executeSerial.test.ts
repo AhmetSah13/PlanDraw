@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  buildAnalyzePayload,
   buildExecuteSerialPayload,
   formatUserError,
   formatValidationDetail,
@@ -61,6 +62,15 @@ describe("execute_serial payload", () => {
     expect(res.parser).toHaveLength(1);
     expect(res.analysis).toEqual([]);
     expect(res.stats.move_count).toBe(1);
+  });
+
+  it("canlı öncesi final analiz için collision_mode error payload üretilebilir", () => {
+    expect(buildAnalyzePayload("MOVE 1 1", [[0, 0, 1, 0]], "error")).toEqual({
+      commands_text: "MOVE 1 1",
+      walls: [[0, 0, 1, 0]],
+      collision_mode: "error",
+    });
+    expect(buildAnalyzePayload("MOVE 1 1").collision_mode).toBe("warn");
   });
 });
 

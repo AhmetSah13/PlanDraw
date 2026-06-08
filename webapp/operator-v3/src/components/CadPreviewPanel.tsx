@@ -221,6 +221,11 @@ export function CadPreviewPanel({
     : simPlayback.active
       ? tr.preview.simRunning
       : null;
+  const currentSegment = segments[Math.min(simPlayback.segmentIndex, Math.max(segments.length - 1, 0))];
+  const currentPenLabel = currentSegment?.kind === "draw" ? tr.preview.penDown : tr.preview.penUp;
+  const segmentLabel = segments.length
+    ? `${Math.min(simPlayback.segmentIndex + 1, segments.length)} / ${segments.length}`
+    : "0 / 0";
 
   return (
     <GlowCard
@@ -262,6 +267,15 @@ export function CadPreviewPanel({
             </div>
             <p className="mt-1">
               {tr.preview.simProgress}: {Math.round(simPlayback.progress)}%
+            </p>
+            <p className="mt-0.5">
+              {tr.preview.simSegment}: {segmentLabel}
+            </p>
+            <p className="mt-0.5">
+              {tr.preview.penState}: {currentPenLabel}
+            </p>
+            <p className="mt-0.5">
+              {tr.preview.simDuration}: {Math.round(simPlayback.durationMs / 1000)} sn
             </p>
             {simJobId ? (
               <p className="mt-0.5 truncate text-slate-500">

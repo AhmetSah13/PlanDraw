@@ -55,6 +55,11 @@ export const tr = {
     simRunning: "Komut önizlemesi oynatılıyor…",
     simCompleted: "Simülasyon tamamlandı",
     simProgress: "İlerleme",
+    simSegment: "Segment",
+    simDuration: "Süre",
+    penState: "Kalem",
+    penUp: "Yukarı",
+    penDown: "Aşağı",
     simJob: "Job",
     travelLegend: "Kalem yukarı",
     drawLegend: "Çizim",
@@ -118,9 +123,9 @@ export const tr = {
       "Robot hareket etmez; üretilen komutlar ve güvenli gönderim akışı test edilir.",
     simulate: "Simülasyonu Başlat",
     simulateHint:
-      "Bu adım çizim komutlarını simülasyon işine gönderir. Başarılı yanıt job oluşturmayı doğrular; canlı animasyon henüz bağlı değildir.",
+      "Bu adım çizim komutlarından yavaş bir görsel önizleme üretir; gerçek motor/zemin davranışını temsil etmez.",
     simJobCreated:
-      "Simülasyon işi oluşturuldu; canlı animasyon henüz bağlı değil (job doğrulama adımı).",
+      "Backend simülasyon işi oluşturuldu; görsel önizleme komutlardan başlatıldı.",
     live: "Canlı Robota Gönder",
     stop: "Robotu Durdur (Canlı STOP)",
     stopNote: "Yazılımsal STOP komutudur. Fiziksel acil stop'un yerini tutmaz.",

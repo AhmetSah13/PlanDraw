@@ -19,6 +19,18 @@ interface RobotControlDeckProps {
   simulationActive: boolean;
   selectedFileName: string | null;
   actionFeedback: ActionFeedback | null;
+  canCompile: boolean;
+  canDryRun: boolean;
+  canSimulate: boolean;
+  canLive: boolean;
+  compileReason: string | null;
+  dryRunReason: string | null;
+  simulateReason: string | null;
+  liveReason: string | null;
+  compileAnchorId?: string;
+  robotAnchorId?: string;
+  compileAnchorRef?: (el: HTMLDivElement | null) => void;
+  robotAnchorRef?: (el: HTMLDivElement | null) => void;
   onFileSelect: (file: File) => void;
   onCompile: () => void;
   onDryRun: () => void;
@@ -34,6 +46,18 @@ export function RobotControlDeck({
   simulationActive,
   selectedFileName,
   actionFeedback,
+  canCompile,
+  canDryRun,
+  canSimulate,
+  canLive,
+  compileReason,
+  dryRunReason,
+  simulateReason,
+  liveReason,
+  compileAnchorId,
+  robotAnchorId,
+  compileAnchorRef,
+  robotAnchorRef,
   onFileSelect,
   onCompile,
   onDryRun,
@@ -43,53 +67,63 @@ export function RobotControlDeck({
   onSimStop,
 }: RobotControlDeckProps) {
   const [liveConfirmOpen, setLiveConfirmOpen] = useState(false);
-  const disabled = !hasCommands || busy;
 
   return (
     <GlowCard title={tr.control.title} accent>
       <p className="mb-4 text-xs text-cyan-200/70">{tr.control.penSafeNote}</p>
 
-      <label className="btn-ghost mb-3 w-full cursor-pointer">
-        <Upload className="h-4 w-4" />
-        {tr.control.upload}
-        <input
-          type="file"
-          accept=".dxf,.json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onFileSelect(f);
-            e.target.value = "";
-          }}
-        />
-      </label>
-      {selectedFileName ? (
-        <p className="mb-4 truncate text-xs text-slate-500">{selectedFileName}</p>
-      ) : null}
+      <div id={compileAnchorId} ref={compileAnchorRef} className="scroll-mt-4">
+        <label className="btn-ghost mb-3 w-full cursor-pointer">
+          <Upload className="h-4 w-4" />
+          {tr.control.upload}
+          <input
+            type="file"
+            accept=".dxf,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onFileSelect(f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {selectedFileName ? (
+          <p className="mb-4 truncate text-xs text-slate-500">{selectedFileName}</p>
+        ) : null}
+      </div>
 
       <div className="grid gap-2 sm:grid-cols-2">
-        <button type="button" className="btn-cyan" disabled={!selectedFileName || busy} onClick={onCompile}>
+        <button type="button" className="btn-cyan" disabled={!canCompile} onClick={onCompile}>
           <FileCode2 className="h-4 w-4" />
           {busy ? tr.control.busy : tr.control.compile}
         </button>
-        <button type="button" className="btn-ghost" disabled={disabled} onClick={onDryRun}>
+        <button type="button" className="btn-ghost" disabled={!canDryRun} onClick={onDryRun}>
           <Play className="h-4 w-4" />
           {tr.control.dryRun}
         </button>
-        <button type="button" className="btn-ghost" disabled={disabled} onClick={onSimulate}>
+        <button type="button" className="btn-ghost" disabled={!canSimulate} onClick={onSimulate}>
           <Radio className="h-4 w-4" />
           {tr.control.simulate}
         </button>
         <button
           type="button"
           className="btn-cyan border-amber-500/40 bg-amber-500/10 text-amber-100 hover:border-amber-400/50"
-          disabled={disabled}
+          disabled={!canLive}
           onClick={() => setLiveConfirmOpen(true)}
         >
           <Send className="h-4 w-4" />
           {tr.control.live}
         </button>
       </div>
+
+      {[compileReason, dryRunReason, simulateReason, liveReason].filter(Boolean).length ? (
+        <div className="mt-3 space-y-1 text-[11px] leading-snug text-slate-500">
+          {compileReason ? <p>{tr.control.compile}: {compileReason}</p> : null}
+          {dryRunReason ? <p>{tr.control.dryRun}: {dryRunReason}</p> : null}
+          {simulateReason ? <p>{tr.control.simulate}: {simulateReason}</p> : null}
+          {liveReason ? <p>{tr.control.live}: {liveReason}</p> : null}
+        </div>
+      ) : null}
 
       <p className="mt-2 text-[11px] leading-snug text-slate-500">{tr.control.dryRunHint}</p>
       <p className="mt-1 text-[11px] leading-snug text-slate-600">{tr.control.simulateHint}</p>
@@ -100,24 +134,26 @@ export function RobotControlDeck({
         <p className="mt-3 text-xs text-slate-600">{tr.control.needsPlan}</p>
       ) : null}
 
-      <p className="mt-4 flex items-start gap-2 text-[11px] text-amber-400/80">
-        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        {tr.control.liveNote}
-      </p>
+      <div id={robotAnchorId} ref={robotAnchorRef} className="scroll-mt-4">
+        <p className="mt-4 flex items-start gap-2 text-[11px] text-amber-400/80">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {tr.control.liveNote}
+        </p>
 
-      <div className="mt-6 rounded-2xl border-2 border-red-500/40 bg-red-950/30 p-4">
-        <button type="button" className="btn-stop w-full py-3 text-base" disabled={busy} onClick={onLiveStop}>
-          <Square className="h-5 w-5 fill-current" />
-          {tr.control.stop}
-        </button>
-        <p className="mt-2 text-center text-[10px] text-red-300/70">{tr.control.stopNote}</p>
+        <div className="mt-6 rounded-2xl border-2 border-red-500/40 bg-red-950/30 p-4">
+          <button type="button" className="btn-stop w-full py-3 text-base" disabled={busy} onClick={onLiveStop}>
+            <Square className="h-5 w-5 fill-current" />
+            {tr.control.stop}
+          </button>
+          <p className="mt-2 text-center text-[10px] text-red-300/70">{tr.control.stopNote}</p>
+        </div>
+
+        {simulationActive ? (
+          <button type="button" className="btn-ghost mt-3 w-full" disabled={busy} onClick={onSimStop}>
+            {tr.control.simStop}
+          </button>
+        ) : null}
       </div>
-
-      {simulationActive ? (
-        <button type="button" className="btn-ghost mt-3 w-full" disabled={busy} onClick={onSimStop}>
-          {tr.control.simStop}
-        </button>
-      ) : null}
 
       {liveConfirmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

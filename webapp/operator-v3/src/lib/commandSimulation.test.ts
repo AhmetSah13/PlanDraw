@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  SIMULATION_MIN_DURATION_MS,
+  buildSimulationPreview,
   buildSimulationSegments,
   createIdlePlayback,
+  getSimulationProgress,
   parseCommandsToSegments,
+  parseCommandsToSimulationSegments,
   pathPointsToSegments,
+  resetSimulationPlayback,
   startPlayback,
   tickPlayback,
 } from "./commandSimulation";
@@ -68,10 +73,58 @@ describe("commandSimulation", () => {
     expect(pb.progress).toBe(100);
   });
 
+  it("MOVE_TO, DRAW_TO, DRAW ve PEN_UNDERSCORE komutlarından preview üretir", () => {
+    const parsed = parseCommandsToSimulationSegments(`BEGIN
+PEN_UP
+MOVE_TO 0 0
+PEN_DOWN
+DRAW_TO 20 0
+PEN_UP
+MOVE 30 0
+DRAW 30 10
+END`);
+    expect(parsed.segments.some((s) => s.kind === "draw")).toBe(true);
+    expect(parsed.segments.some((s) => s.kind === "travel")).toBe(true);
+    expect(parsed.warnings).toHaveLength(0);
+  });
+
+  it("TURN/FORWARD ve MOVE_REL komutları simülasyon segmentine çevrilir", () => {
+    const segs = parseCommandsToSegments(`PEN DOWN
+FORWARD 10
+TURN 90
+FORWARD 5
+MOVE_REL 5 0`);
+    expect(segs).toHaveLength(3);
+    expect(segs.every((s) => s.kind === "draw")).toBe(true);
+  });
+
+  it("bozuk satır parser'ı çökertmez ve uyarı döner", () => {
+    const parsed = parseCommandsToSimulationSegments(`PEN DOWN
+MOVE 10 0
+BOZUK KOMUT
+MOVE 20 0`);
+    expect(parsed.segments).toHaveLength(2);
+    expect(parsed.warnings[0].message).toContain("atladı");
+  });
+
+  it("preview önce commandsText, yoksa pathPoints kullanır", () => {
+    expect(buildSimulationPreview("PEN DOWN\nMOVE 10 0", [[0, 0], [1, 1]]).source).toBe("commands");
+    expect(buildSimulationPreview("", [[0, 0], [1, 1]]).source).toBe("pathPoints");
+    expect(buildSimulationPreview("", []).error).toContain("Önce planı derleyin");
+  });
+
+  it("kısa planlarda minimum izlenebilir animasyon süresi uygular", () => {
+    const segs = parseCommandsToSegments("PEN DOWN\nMOVE 1 0");
+    const pb = startPlayback(3, segs);
+    expect(pb.durationMs).toBeGreaterThanOrEqual(SIMULATION_MIN_DURATION_MS);
+    expect(getSimulationProgress(pb)).toBe(0);
+  });
+
   it("createIdlePlayback yeni dosya reset durumunu temsil eder", () => {
-    const idle = createIdlePlayback();
+    const idle = resetSimulationPlayback();
     expect(idle.active).toBe(false);
     expect(idle.progress).toBe(0);
     expect(idle.completed).toBe(false);
+    expect(createIdlePlayback().elapsedMs).toBe(0);
   });
 });

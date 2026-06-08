@@ -312,13 +312,22 @@ export function normalizeAnalyzeResponse(data: unknown): AnalyzeResponse {
 export async function analyzeCommands(
   commandsText: string,
   walls?: number[][],
+  collisionMode: "warn" | "error" = "warn",
 ): Promise<AnalyzeResponse> {
-  const data = await postJson<unknown>("/api/analyze", {
+  const data = await postJson<unknown>("/api/analyze", buildAnalyzePayload(commandsText, walls, collisionMode));
+  return normalizeAnalyzeResponse(data);
+}
+
+export function buildAnalyzePayload(
+  commandsText: string,
+  walls?: number[][],
+  collisionMode: "warn" | "error" = "warn",
+): Record<string, unknown> {
+  return {
     commands_text: commandsText,
     walls,
-    collision_mode: "warn",
-  });
-  return normalizeAnalyzeResponse(data);
+    collision_mode: collisionMode,
+  };
 }
 
 export interface ExecuteSerialOptions {

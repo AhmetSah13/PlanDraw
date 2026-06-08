@@ -28,9 +28,14 @@ export const DEMO_PLANS: DemoPlanMeta[] = [
   },
 ];
 
-export async function loadDemoPlan(id: DemoPlanId): Promise<File> {
+export function getDemoPlanMeta(id: DemoPlanId): DemoPlanMeta {
   const plan = DEMO_PLANS.find((p) => p.id === id);
   if (!plan) throw new Error("Demo plan bulunamadı.");
+  return plan;
+}
+
+export async function loadDemoPlan(id: DemoPlanId): Promise<File> {
+  const plan = getDemoPlanMeta(id);
 
   const res = await fetch(`/demo/${plan.file}`);
   if (!res.ok) {
